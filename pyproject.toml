@@ -1,0 +1,6 @@
+[project]
+name = "ai-bidding"
+version = "0.1.0"
+description = "基于AI的投标方案辅助生成系统"
+requires-python = ">=3.11"
+dependencies = []
