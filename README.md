@@ -69,3 +69,12 @@ ai-bidding/
     ├── test_document_parser.py
     └── test_llm_service.py
 ```
+
+### 项目运行
+
+1. 安装依赖
+
+```bash
+make install
+make dev-install
+```
