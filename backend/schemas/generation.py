@@ -22,7 +22,7 @@ class SectionGenerationRequest(BaseModel):
 
 class AnalysisRequest(BaseModel):
     """需求分析请求"""
-    document_path: str = Field(..., description="文档路径")
+    file_path: str = Field(..., description="文档路径")
 
 
 class DifferentiationRequest(BaseModel):

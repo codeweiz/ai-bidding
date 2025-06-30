@@ -42,16 +42,21 @@ class ContentGenerator:
             
             # 3. 运行工作流
             final_state = await workflow_engine.run_workflow(workflow_state)
-            
-            if final_state.error:
+
+            # 处理工作流返回的结果（可能是字典或WorkflowState对象）
+            if isinstance(final_state, dict):
+                # 如果是字典，转换为WorkflowState对象
+                final_state = WorkflowState(**final_state)
+
+            if hasattr(final_state, 'error') and final_state.error:
                 return {
                     "status": "error",
                     "error": final_state.error
                 }
-            
+
             # 4. 生成Word文档
             word_doc_path = await self._generate_word_document(project, final_state)
-            
+
             return {
                 "status": "success",
                 "requirements_analysis": final_state.requirements_analysis,

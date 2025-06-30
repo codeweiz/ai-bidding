@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File
 
 from backend.services.content_generator import content_generator
+from backend.schemas.generation import AnalysisRequest
 
 logger = logging.getLogger(__name__)
 
@@ -52,14 +53,14 @@ async def upload_document(file: UploadFile = File(...)) -> Dict[str, Any]:
 
 
 @router.post("/analyze")
-async def analyze_document(file_path: str) -> Dict[str, Any]:
+async def analyze_document(request: AnalysisRequest) -> Dict[str, Any]:
     """分析招标文档需求"""
     try:
-        if not Path(file_path).exists():
+        if not Path(request.file_path).exists():
             raise HTTPException(status_code=404, detail="文件不存在")
-        
-        result = await content_generator.analyze_requirements_only(file_path)
-        
+
+        result = await content_generator.analyze_requirements_only(request.file_path)
+
         if result["status"] == "success":
             return {
                 "status": "success",
@@ -68,7 +69,7 @@ async def analyze_document(file_path: str) -> Dict[str, Any]:
             }
         else:
             raise HTTPException(status_code=500, detail=result["error"])
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -77,14 +78,14 @@ async def analyze_document(file_path: str) -> Dict[str, Any]:
 
 
 @router.post("/parse")
-async def parse_document(file_path: str) -> Dict[str, Any]:
+async def parse_document(request: AnalysisRequest) -> Dict[str, Any]:
     """解析文档结构"""
     try:
-        if not Path(file_path).exists():
+        if not Path(request.file_path).exists():
             raise HTTPException(status_code=404, detail="文件不存在")
-        
+
         from backend.services.document_parser import document_parser
-        result = document_parser.parse_document(Path(file_path))
+        result = document_parser.parse_document(Path(request.file_path))
         
         # 提取文档内容预览（前1000字符）
         content_preview = ""
