@@ -2,3 +2,4 @@
 uv.lock
 *.egg-info
 **/*.log
+**/data

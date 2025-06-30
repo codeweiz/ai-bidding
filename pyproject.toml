@@ -30,11 +30,10 @@ dependencies = [
     "gradio>=4.0.0",
     "celery[redis]>=5.3.0",
     "redis>=5.0.0",
-    "sqlalchemy>=2.0.0",
-    "mysqlclient>=2.2.0",
     "loguru>=0.7.0",
     "aiofiles>=23.2.0",
     "httpx>=0.25.0",
+    "langchain-unstructured>=0.1.6",
 ]
 
 [project.optional-dependencies]
@@ -47,3 +46,6 @@ dev = [
     "mypy>=1.5.1",
     "ruff>=0.1.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["backend*", "frontend*"]
