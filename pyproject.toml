@@ -45,3 +45,6 @@ dev = [
     "mypy>=1.5.1",
     "ruff>=0.1.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["backend*", "frontend*"]
