@@ -1,81 +1,163 @@
-.PHONY: help install dev-install run-backend run-frontend run-celery run-all clean test lint format
+.PHONY: help install dev-install setup run run-backend run-frontend run-all clean test lint format check build docker-build docker-run docker-compose-up docker-compose-down
+
+# 项目配置
+PROJECT_NAME := ai-bidding
+PYTHON := python3
+PIP := pip
+BACKEND_PORT := 8000
+FRONTEND_PORT := 7860
 
 # 默认目标
 help:
-	@echo "Available commands:"
-	@echo "  make install       - Install production dependencies"
-	@echo "  make dev-install   - Install development dependencies"
-	@echo "  make run-backend   - Run FastAPI backend server"
-	@echo "  make run-frontend  - Run Gradio frontend"
-	@echo "  make run-celery    - Run Celery worker"
-	@echo "  make run-all       - Run all services"
-	@echo "  make test          - Run tests"
-	@echo "  make lint          - Run linting"
-	@echo "  make format        - Format code"
-	@echo "  make clean         - Clean cache files"
+	@echo "🤖 AI投标方案生成系统 - 可用命令："
+	@echo ""
+	@echo "📦 环境管理:"
+	@echo "  make install       - 安装生产环境依赖"
+	@echo "  make dev-install   - 安装开发环境依赖"
+	@echo "  make setup         - 初始化项目环境"
+	@echo "  make clean         - 清理缓存文件"
+	@echo ""
+	@echo "🚀 运行服务:"
+	@echo "  make run           - 一键启动所有服务"
+	@echo "  make run-backend   - 启动后端服务 (端口:$(BACKEND_PORT))"
+	@echo "  make run-frontend  - 启动前端服务 (端口:$(FRONTEND_PORT))"
+	@echo "  make run-all       - 分别启动所有服务"
+	@echo ""
+	@echo "🧪 测试和质量:"
+	@echo "  make test          - 运行测试"
+	@echo "  make test-cov      - 运行测试并生成覆盖率报告"
+	@echo "  make lint          - 代码检查"
+	@echo "  make format        - 代码格式化"
+	@echo "  make check         - 完整代码质量检查"
+	@echo ""
+	@echo "🐳 Docker部署:"
+	@echo "  make build         - 构建项目"
+	@echo "  make docker-build  - 构建Docker镜像"
+	@echo "  make docker-run    - 运行Docker容器"
+	@echo "  make docker-compose-up   - 使用docker-compose启动"
+	@echo "  make docker-compose-down - 停止docker-compose服务"
 
-# 安装依赖
+# ==================== 环境管理 ====================
+
 install:
-	uv pip install -e .
+	@echo "📦 安装生产环境依赖..."
+	$(PIP) install -e .
 
 dev-install:
-	uv pip install -e ".[dev]"
+	@echo "📦 安装开发环境依赖..."
+	$(PIP) install -e ".[dev]"
 
-# 运行服务
+setup: dev-install
+	@echo "🔧 初始化项目环境..."
+	@mkdir -p uploads outputs logs
+	@echo "✅ 项目环境初始化完成"
+	@echo "⚠️  请确保在 config.toml 中配置正确的 API 密钥"
+
+# ==================== 运行服务 ====================
+
+run:
+	@echo "🚀 启动AI投标方案生成系统..."
+	$(PYTHON) run.py
+
 run-backend:
-	uvicorn backend.main:app --reload --port 8000
+	@echo "🚀 启动后端服务..."
+	uvicorn backend.main:app --host 0.0.0.0 --port $(BACKEND_PORT) --reload
 
 run-frontend:
-	python -m frontend.app
+	@echo "🚀 启动前端服务..."
+	$(PYTHON) -m frontend.app
 
-run-celery:
-	celery -A backend.tasks.celery_app worker --loglevel=info
-
-run-redis:
-	redis-server
-
-run-mysql:
-	@echo "Please ensure MySQL is running on your system"
-
-# 同时运行所有服务（需要多个终端）
 run-all:
-	@echo "Starting all services..."
-	@echo "Please run the following commands in separate terminals:"
-	@echo "1. make run-redis"
-	@echo "2. make run-mysql"
-	@echo "3. make run-celery"
-	@echo "4. make run-backend"
-	@echo "5. make run-frontend"
+	@echo "🚀 启动所有服务..."
+	@echo "请在不同终端中运行以下命令："
+	@echo "1. make run-backend"
+	@echo "2. make run-frontend"
 
-# 测试
+# ==================== 测试和质量 ====================
+
 test:
-	pytest tests/ -v --cov=backend --cov-report=html
+	@echo "🧪 运行测试..."
+	pytest tests/ -v
 
-# 代码质量
+test-cov:
+	@echo "🧪 运行测试并生成覆盖率报告..."
+	pytest tests/ -v --cov=backend --cov=frontend --cov-report=html --cov-report=term
+	@echo "📊 覆盖率报告已生成: htmlcov/index.html"
+
 lint:
+	@echo "🔍 代码检查..."
 	ruff check backend/ frontend/ tests/
 
 format:
+	@echo "🎨 代码格式化..."
 	black backend/ frontend/ tests/
 	ruff check --fix backend/ frontend/ tests/
 
-# 清理
+check: lint test
+	@echo "✅ 代码质量检查完成"
+
+# ==================== 构建和部署 ====================
+
+build:
+	@echo "🔨 构建项目..."
+	$(PYTHON) -m build
+
+docker-build:
+	@echo "🐳 构建Docker镜像..."
+	docker build -t $(PROJECT_NAME):latest .
+
+docker-run:
+	@echo "🐳 运行Docker容器..."
+	docker run -p $(BACKEND_PORT):$(BACKEND_PORT) -p $(FRONTEND_PORT):$(FRONTEND_PORT) \
+		-v $(PWD)/uploads:/app/uploads \
+		-v $(PWD)/outputs:/app/outputs \
+		-v $(PWD)/config.toml:/app/config.toml \
+		$(PROJECT_NAME):latest
+
+docker-compose-up:
+	@echo "🐳 使用docker-compose启动服务..."
+	docker-compose up -d
+
+docker-compose-down:
+	@echo "🐳 停止docker-compose服务..."
+	docker-compose down
+
+# ==================== 清理 ====================
+
 clean:
-	find . -type d -name "__pycache__" -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
-	find . -type f -name ".coverage" -delete
-	rm -rf htmlcov/
-	rm -rf .pytest_cache/
-	rm -rf .ruff_cache/
+	@echo "🧹 清理缓存文件..."
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	find . -type f -name ".coverage" -delete 2>/dev/null || true
+	rm -rf htmlcov/ .pytest_cache/ .ruff_cache/ build/ dist/ *.egg-info/
+	@echo "✅ 清理完成"
 
-# 数据库迁移
-db-init:
-	python -m backend.core.database init
+clean-all: clean
+	@echo "🧹 深度清理..."
+	rm -rf uploads/* outputs/* logs/*
+	@echo "✅ 深度清理完成"
 
-db-upgrade:
-	python -m backend.core.database upgrade
+# ==================== 开发工具 ====================
 
-# 环境设置
-setup-env:
-	cp .env.example .env
-	@echo "Please edit .env file with your configuration"
+dev-server:
+	@echo "🔧 启动开发服务器..."
+	uvicorn backend.main:app --host 0.0.0.0 --port $(BACKEND_PORT) --reload --log-level debug
+
+logs:
+	@echo "📋 查看日志..."
+	tail -f logs/app.log
+
+check-config:
+	@echo "🔧 检查配置..."
+	$(PYTHON) -c "from backend.core.toml_config import toml_config; print('✅ 配置加载成功'); print(f'LLM Provider: {toml_config.llm.provider}'); print(f'Model: {toml_config.llm.model_name}')"
+
+# ==================== 帮助信息 ====================
+
+status:
+	@echo "📊 项目状态:"
+	@echo "  项目名称: $(PROJECT_NAME)"
+	@echo "  Python版本: $(shell $(PYTHON) --version)"
+	@echo "  后端端口: $(BACKEND_PORT)"
+	@echo "  前端端口: $(FRONTEND_PORT)"
+	@echo "  上传目录: $(shell ls -la uploads 2>/dev/null | wc -l) 个文件"
+	@echo "  输出目录: $(shell ls -la outputs 2>/dev/null | wc -l) 个文件"
