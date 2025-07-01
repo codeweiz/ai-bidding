@@ -1,7 +1,11 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from enum import Enum
+from sqlalchemy import Column, String, DateTime, Text, JSON, Boolean
+from sqlalchemy.orm import relationship
 from pydantic import BaseModel, Field
+
+from backend.core.database import Base
 
 
 class ProjectStatus(str, Enum):
@@ -12,6 +16,39 @@ class ProjectStatus(str, Enum):
     CONTENT_GENERATING = "content_generating"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+# SQLAlchemy 数据库模型
+class ProjectDB(Base):
+    """项目数据库模型"""
+    __tablename__ = "projects"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String, default=ProjectStatus.CREATED)
+
+    # 文档信息
+    document_path = Column(String, nullable=True)
+    document_name = Column(String, nullable=True)
+
+    # 分析结果
+    requirements_analysis = Column(Text, nullable=True)
+    outline = Column(Text, nullable=True)
+
+    # 生成内容
+    sections = Column(JSON, default=list)
+    final_document_path = Column(String, nullable=True)
+
+    # 配置选项
+    enable_differentiation = Column(Boolean, default=True)
+
+    # 时间戳
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 关系
+    tasks = relationship("TaskDB", back_populates="project", cascade="all, delete-orphan")
 
 
 class Project(BaseModel):

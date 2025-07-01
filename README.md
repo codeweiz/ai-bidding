@@ -1,8 +1,35 @@
-# 🤖 AI投标方案生成系统
+# 🤖 AI投标方案生成系统 v2.0
 
 基于AI的投标方案辅助生成系统，帮助企业快速生成高质量的技术投标方案。
 
-## ✨ 功能特性
+## 🆕 v2.0 增强版特性
+
+### 🚀 全自动化工作流
+- **LangGraph驱动**：完全自动化的端到端工作流，无需人工干预
+- **状态管理**：智能的工作流状态管理和流程控制
+- **错误恢复**：自动错误检测和恢复机制
+
+### 🔄 持久化与恢复
+- **PostgreSQL存储**：可靠的数据持久化存储
+- **检查点机制**：详细记录每个步骤的执行状态
+- **断点续传**：服务重启后可从中断点继续执行
+
+### ✅ 智能校验与纠错
+- **多层次校验**：内容质量、相关性、专业性全方位校验
+- **自动纠错**：AI驱动的内容修正和优化
+- **质量保证**：防止内容畸变和脱离招标范围
+
+### ⚡ 异步任务处理
+- **Celery队列**：高性能异步任务处理
+- **智能重试**：指数退避重试策略
+- **任务监控**：Flower实时监控任务执行状态
+
+### 📄 专业输出格式
+- **Word格式**：专业的Word文档输出
+- **格式解析器**：智能的内容格式化和排版
+- **模板支持**：可定制的文档模板和样式
+
+## ✨ 核心功能特性
 
 - 📄 **智能文档解析**：支持Word、PDF格式招标文件的自动解析
 - 🧠 **AI需求分析**：自动提取技术需求、功能需求、性能指标等关键信息
@@ -14,12 +41,15 @@
 
 ## 🏗️ 技术架构
 
-### 核心技术栈
+### v2.0 增强技术栈
 - **后端框架**：FastAPI + LangChain + LangGraph
+- **数据库**：PostgreSQL (持久化) + Redis (缓存/队列)
+- **任务队列**：Celery + Redis
 - **AI模型**：DeepSeek Chat（可配置其他LLM）
-- **文档处理**：Unstructured
+- **文档处理**：Unstructured + python-docx
 - **前端界面**：Gradio
-- **文档生成**：python-docx
+- **监控工具**：Flower (Celery监控)
+- **容器化**：Docker + Docker Compose
 
 ### 系统架构
 ```
@@ -43,12 +73,45 @@
 
 ## 🚀 快速开始
 
-### 1. 环境要求
+### 方式一：增强版部署（推荐）
+
+#### 1. 环境要求
+- Python 3.11+
+- Docker & Docker Compose
+- 8GB+ 内存（推荐）
+- DeepSeek API密钥（或其他LLM API密钥）
+
+#### 2. 克隆和配置
+```bash
+# 克隆项目
+git clone <repository-url>
+cd ai-bidding
+
+# 配置API密钥
+cp config.toml.example config.toml
+# 编辑config.toml设置API密钥
+```
+
+#### 3. 启动增强版系统
+```bash
+# 使用增强版启动脚本
+./start_enhanced.sh
+```
+
+#### 4. 访问增强版服务
+- 🌐 前端界面：http://localhost:7860
+- 📊 后端API：http://localhost:8000
+- 📚 API文档：http://localhost:8000/docs
+- 🔍 任务监控：http://localhost:5555
+
+### 方式二：标准版部署
+
+#### 1. 环境要求
 - Python 3.11+
 - 8GB+ 内存
 - DeepSeek API密钥（或其他LLM API密钥）
 
-### 2. 安装依赖
+#### 2. 安装依赖
 ```bash
 # 克隆项目
 git clone <repository-url>
@@ -60,7 +123,7 @@ make install
 pip install -e .
 ```
 
-### 3. 配置设置
+#### 3. 配置设置
 编辑 `config.toml` 文件，配置API密钥：
 ```toml
 [llm]
@@ -69,7 +132,7 @@ model_name = "deepseek-chat"
 api_key = "your-api-key-here"
 ```
 
-### 4. 启动系统
+#### 4. 启动标准版系统
 ```bash
 # 一键启动（推荐）
 python run.py
@@ -79,14 +142,52 @@ make run-backend  # 启动后端 (端口8000)
 make run-frontend # 启动前端 (端口7860)
 ```
 
-### 5. 访问系统
+#### 5. 访问标准版服务
 - 🌐 前端界面：http://localhost:7860
 - 📊 后端API：http://localhost:8000
 - 📚 API文档：http://localhost:8000/docs
 
 ## 📖 使用指南
 
-### 基本流程
+### 🚀 增强版全自动化流程（推荐）
+
+#### API方式（完全自动化）
+```bash
+# 1. 创建项目
+curl -X POST "http://localhost:8000/api/projects/" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "测试项目", "description": "全自动化测试", "enable_differentiation": true}'
+
+# 2. 上传文档
+curl -X POST "http://localhost:8000/api/documents/upload" \
+  -F "file=@/path/to/bidding_document.pdf"
+
+# 3. 启动全自动化任务
+curl -X POST "http://localhost:8000/api/tasks/" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "your-project-id",
+    "task_type": "full_workflow",
+    "config": {
+      "document_path": "/app/uploads/bidding_document.pdf",
+      "enable_differentiation": true,
+      "enable_validation": true,
+      "project_name": "测试项目"
+    }
+  }'
+
+# 4. 监控任务进度
+curl "http://localhost:8000/api/tasks/{task_id}/status"
+```
+
+#### 前端界面方式
+1. 访问 http://localhost:7860
+2. 创建新项目
+3. 上传招标文档
+4. 点击"启动全自动化流程"
+5. 在任务监控页面查看进度
+
+### 📋 标准版基本流程
 1. **创建项目**：在"项目管理"页面创建新项目
 2. **上传文档**：在"文档处理"页面上传招标文件
 3. **分析需求**：系统自动解析文档并提取需求

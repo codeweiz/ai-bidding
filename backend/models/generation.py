@@ -55,18 +55,28 @@ class WorkflowState(BaseModel):
     """工作流状态模型"""
     project_id: str = Field(..., description="项目ID")
     current_step: str = Field(..., description="当前步骤")
-    
+
     # 数据状态
     document_content: Optional[str] = Field(None, description="文档内容")
     requirements_analysis: Optional[str] = Field(None, description="需求分析")
     outline: Optional[str] = Field(None, description="方案提纲")
     sections: List[Dict[str, Any]] = Field(default_factory=list, description="章节列表")
-    
+
     # 配置
     enable_differentiation: bool = Field(default=True, description="启用差异化")
-    
+    enable_validation: bool = Field(default=True, description="启用校验")
+
+    # 新增字段 - 任务和校验相关
+    task_id: Optional[str] = Field(None, description="关联的任务ID")
+    validation_reports: List[Dict[str, Any]] = Field(default_factory=list, description="校验报告")
+
+    # 重试计数
+    requirements_retry_count: int = Field(default=0, description="需求分析重试次数")
+    outline_retry_count: int = Field(default=0, description="提纲生成重试次数")
+    content_retry_count: int = Field(default=0, description="内容生成重试次数")
+
     # 错误信息
     error: Optional[str] = Field(None, description="错误信息")
-    
+
     # 时间戳
     updated_at: datetime = Field(default_factory=datetime.now)

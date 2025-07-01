@@ -161,7 +161,7 @@ class LLMService:
                 "error": str(e)
             }
 
-    async def differentiate_content(self, original_content: str) -> Dict[str, Any]:
+    async def differentiate_content(self, original_content: str, section_title: str = "") -> Dict[str, Any]:
         """对内容进行差异化处理"""
         system_prompt = """
         你是一位专业的文档编辑专家。请对以下技术方案内容进行差异化改写，确保：
@@ -191,16 +191,26 @@ class LLMService:
             response = await self.llm.ainvoke(messages)
 
             return {
-                "differentiated_content": response.content,
+                "content": response.content,  # 修改为content以保持一致性
                 "status": "success"
             }
         except Exception as e:
             logger.error(f"差异化处理失败: {e}")
             return {
-                "differentiated_content": original_content,
+                "content": original_content,
                 "status": "error",
                 "error": str(e)
             }
+
+    async def _call_llm_with_prompt(self, prompt: str) -> str:
+        """通用的LLM调用方法"""
+        try:
+            messages = [HumanMessage(content=prompt)]
+            response = await self.llm.ainvoke(messages)
+            return response.content
+        except Exception as e:
+            logger.error(f"LLM调用失败: {e}")
+            raise
 
 
 # 全局实例

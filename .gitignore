@@ -4,3 +4,5 @@ uv.lock
 **/*.log
 **/data
 outputs
+*.db
+*.rdb
