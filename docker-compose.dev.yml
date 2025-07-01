@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  ai-bidding-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: ai-bidding-dev
+    ports:
+      - "8000:8000"  # 后端API
+      - "7860:7860"  # 前端界面
+      - "5678:5678"  # 调试端口
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+      - ./logs:/app/logs
+      - ./config.toml:/app/config.toml
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - DEBUG=true
+      - RELOAD=true
+    restart: unless-stopped
+    command: ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "--wait-for-client", "run.py"]
+
+  redis-dev:
+    image: redis:7-alpine
+    container_name: ai-bidding-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    restart: unless-stopped
+
+  # 可选：开发数据库
+  postgres-dev:
+    image: postgres:15-alpine
+    container_name: ai-bidding-postgres-dev
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ai_bidding_dev
+      POSTGRES_USER: ai_bidding
+      POSTGRES_PASSWORD: dev_password
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    profiles:
+      - database
+
+volumes:
+  redis_dev_data:
+  postgres_dev_data:
+
+networks:
+  default:
+    name: ai-bidding-dev-network
