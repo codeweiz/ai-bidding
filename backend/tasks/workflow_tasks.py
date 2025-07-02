@@ -82,8 +82,9 @@ async def _run_full_workflow_async(task_id: str, project_id: str, document_path:
                 enable_validation=config.get("enable_validation", True)
             )
         
-        # 运行工作流引擎（暂时使用原版，后续可切换到增强版）
-        final_state = await workflow_engine.run_workflow(initial_state)
+        # 运行增强版工作流引擎
+        from backend.services.enhanced_workflow_engine import enhanced_workflow_engine
+        final_state = await enhanced_workflow_engine.run_workflow_with_persistence(initial_state, task_id)
         
         # 检查工作流是否成功完成
         if hasattr(final_state, 'error') and final_state.error:

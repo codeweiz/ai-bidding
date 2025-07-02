@@ -32,10 +32,10 @@ class AIBiddingApp:
         except Exception as e:
             return f"❌ 上传异常: {str(e)}", ""
 
-    def analyze_document(self, file_path: str) -> Tuple[str, str]:
-        """分析文档需求"""
+    def analyze_document(self, file_path: str) -> Tuple[str, str, str, str]:
+        """分析文档需求（增强版）"""
         if not file_path:
-            return "请先上传文档", ""
+            return "请先上传文档", "", "", ""
 
         try:
             response = requests.post(
@@ -46,12 +46,21 @@ class AIBiddingApp:
             if response.status_code == 200:
                 result = response.json()
                 analysis = result['analysis']
-                return "✅ 需求分析完成", analysis
+
+                # 尝试获取结构化数据
+                structured_data = result.get('structured_data', {})
+                mandatory_reqs = structured_data.get('mandatory_requirements', [])
+                important_reqs = structured_data.get('important_requirements', [])
+
+                mandatory_text = "\n".join([f"• {req}" for req in mandatory_reqs[:10]])  # 显示前10个
+                important_text = "\n".join([f"• {req}" for req in important_reqs[:10]])  # 显示前10个
+
+                return "✅ 需求分析完成", analysis, mandatory_text, important_text
             else:
-                return f"❌ 分析失败: {response.text}", ""
+                return f"❌ 分析失败: {response.text}", "", "", ""
 
         except Exception as e:
-            return f"❌ 分析异常: {str(e)}", ""
+            return f"❌ 分析异常: {str(e)}", "", "", ""
 
     def create_project(self, project_name: str, description: str, enable_diff: bool) -> str:
         """创建项目"""
@@ -215,7 +224,12 @@ def create_interface():
                     file_path = gr.Textbox(label="文件路径", interactive=False, visible=False)
 
             with gr.Row():
-                analysis_result = gr.Textbox(label="需求分析结果", lines=10, interactive=False)
+                with gr.Column():
+                    analysis_result = gr.Textbox(label="需求分析结果", lines=8, interactive=False)
+
+                with gr.Column():
+                    mandatory_reqs = gr.Textbox(label="强制性要求（★条款）", lines=4, interactive=False)
+                    important_reqs = gr.Textbox(label="重要参数（▲条款）", lines=4, interactive=False)
 
             upload_btn.click(
                 app.upload_document,
@@ -226,7 +240,7 @@ def create_interface():
             analyze_btn.click(
                 app.analyze_document,
                 inputs=[file_path],
-                outputs=[upload_status, analysis_result]
+                outputs=[upload_status, analysis_result, mandatory_reqs, important_reqs]
             )
 
         with gr.Tab("📝 方案生成"):
