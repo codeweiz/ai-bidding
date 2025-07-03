@@ -1,7 +1,8 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import logging
 import asyncio
 from datetime import datetime
+import re
 
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
@@ -13,187 +14,334 @@ from backend.services.document_parser import document_parser
 logger = logging.getLogger(__name__)
 
 
+class SectionNode:
+    """章节节点类，用于构建层次化目录树"""
+
+    def __init__(self, title: str, level: int, order: int):
+        self.title = title
+        self.level = level
+        self.order = order
+        self.children: List['SectionNode'] = []
+        self.parent: Optional['SectionNode'] = None
+        self.content = ""
+        self.is_generated = False
+        self.is_leaf = True
+
+    def add_child(self, child: 'SectionNode'):
+        """添加子节点"""
+        child.parent = self
+        self.children.append(child)
+        self.is_leaf = False
+
+    def get_all_leaf_nodes(self) -> List['SectionNode']:
+        """获取所有叶子节点"""
+        if self.is_leaf:
+            return [self]
+
+        leaf_nodes = []
+        for child in self.children:
+            leaf_nodes.extend(child.get_all_leaf_nodes())
+        return leaf_nodes
+
+    def get_path(self) -> str:
+        """获取节点路径"""
+        path = []
+        current = self
+        while current:
+            path.append(current.title)
+            current = current.parent
+        return " > ".join(reversed(path))
+
+
 class WorkflowEngine:
     """工作流引擎，使用LangGraph管理生成流程"""
-    
+
     def __init__(self):
         self.graph = self._build_workflow()
     
     def _build_workflow(self) -> CompiledStateGraph:
-        """构建工作流图"""
+        """构建优化后的层次化工作流图"""
         workflow = StateGraph(WorkflowState)
-        
+
         # 添加节点
         workflow.add_node("parse_document", self._parse_document)
-        workflow.add_node("analyze_requirements", self._analyze_requirements)
         workflow.add_node("generate_outline", self._generate_outline)
-        workflow.add_node("generate_content", self._generate_content)
+        workflow.add_node("build_section_tree", self._build_section_tree)
+        workflow.add_node("generate_leaf_content", self._generate_leaf_content)
+        workflow.add_node("generate_parent_summaries", self._generate_parent_summaries)
         workflow.add_node("differentiate_content", self._differentiate_content)
         workflow.add_node("finalize", self._finalize)
-        
+
         # 设置入口点
         workflow.set_entry_point("parse_document")
-        
-        # 添加边
-        workflow.add_edge("parse_document", "analyze_requirements")
-        workflow.add_edge("analyze_requirements", "generate_outline")
-        workflow.add_edge("generate_outline", "generate_content")
-        
+
+        # 添加边 - 新的层次化流程
+        workflow.add_edge("parse_document", "generate_outline")
+        workflow.add_edge("generate_outline", "build_section_tree")
+        workflow.add_edge("build_section_tree", "generate_leaf_content")
+        workflow.add_edge("generate_leaf_content", "generate_parent_summaries")
+
         # 条件边：是否需要差异化处理
         workflow.add_conditional_edges(
-            "generate_content",
+            "generate_parent_summaries",
             self._should_differentiate,
             {
                 "differentiate": "differentiate_content",
                 "finalize": "finalize"
             }
         )
-        
+
         workflow.add_edge("differentiate_content", "finalize")
         workflow.add_edge("finalize", END)
-        
+
         return workflow.compile()
     
     async def _parse_document(self, state: WorkflowState) -> WorkflowState:
-        """解析文档节点"""
+        """解析文档节点 - 提取招标文档内容"""
         logger.info(f"开始解析文档，项目ID: {state.project_id}")
-        
+
         try:
-            # 这里假设文档路径已经在state中
-            # 实际实现中需要从项目信息中获取文档路径
             if not state.document_content:
                 state.error = "文档内容为空"
                 return state
-            
+
+            # 清理和预处理文档内容
+            cleaned_content = self._clean_document_content(state.document_content)
+            state.document_content = cleaned_content
+
             state.current_step = "parse_document"
             state.updated_at = datetime.now()
-            
+
             logger.info(f"文档解析完成，项目ID: {state.project_id}")
             return state
-            
+
         except Exception as e:
             logger.error(f"文档解析失败: {e}")
             state.error = str(e)
             return state
-    
-    async def _analyze_requirements(self, state: WorkflowState) -> WorkflowState:
-        """需求分析节点"""
-        logger.info(f"开始需求分析，项目ID: {state.project_id}")
-        
-        try:
-            result = await llm_service.analyze_requirements(state.document_content)
-            
-            if result["status"] == "success":
-                state.requirements_analysis = result["analysis"]
-                state.current_step = "analyze_requirements"
-                state.updated_at = datetime.now()
-                logger.info(f"需求分析完成，项目ID: {state.project_id}")
-            else:
-                state.error = result.get("error", "需求分析失败")
-                logger.error(f"需求分析失败: {state.error}")
-            
-            return state
-            
-        except Exception as e:
-            logger.error(f"需求分析异常: {e}")
-            state.error = str(e)
-            return state
+
+    def _clean_document_content(self, content: str) -> str:
+        """清理文档内容"""
+        # 移除多余的空行
+        content = re.sub(r'\n\s*\n', '\n\n', content)
+        # 移除行首行尾空格
+        lines = [line.strip() for line in content.split('\n')]
+        return '\n'.join(lines)
     
     async def _generate_outline(self, state: WorkflowState) -> WorkflowState:
-        """生成提纲节点"""
+        """生成提纲节点 - 使用优化的IPTV领域prompt"""
         logger.info(f"开始生成提纲，项目ID: {state.project_id}")
-        
+
         try:
-            result = await llm_service.generate_outline(state.requirements_analysis)
-            
+            # 使用您提供的专业prompt生成提纲
+            result = await llm_service.generate_iptv_outline(state.document_content)
+
             if result["status"] == "success":
                 state.outline = result["outline"]
-                # 解析提纲，生成章节列表
-                state.sections = self._parse_outline_to_sections(result["outline"])
                 state.current_step = "generate_outline"
                 state.updated_at = datetime.now()
                 logger.info(f"提纲生成完成，项目ID: {state.project_id}")
             else:
                 state.error = result.get("error", "提纲生成失败")
                 logger.error(f"提纲生成失败: {state.error}")
-            
+
             return state
-            
+
         except Exception as e:
             logger.error(f"提纲生成异常: {e}")
             state.error = str(e)
             return state
     
-    async def _generate_content(self, state: WorkflowState) -> WorkflowState:
-        """生成内容节点"""
-        logger.info(f"开始生成内容，项目ID: {state.project_id}")
-        
+    async def _build_section_tree(self, state: WorkflowState) -> WorkflowState:
+        """构建章节树结构"""
+        logger.info(f"开始构建章节树，项目ID: {state.project_id}")
+
         try:
-            # 为每个章节生成内容
-            for i, section in enumerate(state.sections):
-                logger.info(f"生成章节内容: {section['title']}")
-                
-                result = await llm_service.generate_content(
-                    section_title=section["title"],
-                    section_requirements=section.get("requirements", ""),
-                    context=state.requirements_analysis
-                )
-                
-                if result["status"] == "success":
-                    state.sections[i]["content"] = result["content"]
-                    state.sections[i]["is_generated"] = True
-                else:
-                    logger.error(f"章节内容生成失败: {result.get('error')}")
-                    state.sections[i]["content"] = ""
-                    state.sections[i]["is_generated"] = False
-            
-            state.current_step = "generate_content"
+            if not state.outline:
+                state.error = "提纲为空，无法构建章节树"
+                return state
+
+            # 解析提纲为层次化的章节树
+            section_tree = self._parse_outline_to_tree(state.outline)
+
+            # 将树结构转换为扁平的章节列表（保持层次信息）
+            state.sections = self._tree_to_sections_list(section_tree)
+
+            # 存储树结构到状态中（用于后续处理）
+            state.section_tree = section_tree
+
+            state.current_step = "build_section_tree"
             state.updated_at = datetime.now()
-            logger.info(f"内容生成完成，项目ID: {state.project_id}")
-            
+
+            logger.info(f"章节树构建完成，共{len(state.sections)}个章节，项目ID: {state.project_id}")
             return state
-            
+
         except Exception as e:
-            logger.error(f"内容生成异常: {e}")
+            logger.error(f"构建章节树失败: {e}")
             state.error = str(e)
             return state
     
-    async def _differentiate_content(self, state: WorkflowState) -> WorkflowState:
-        """差异化处理节点"""
-        logger.info(f"开始差异化处理，项目ID: {state.project_id}")
-        
+    async def _generate_leaf_content(self, state: WorkflowState) -> WorkflowState:
+        """生成叶子节点内容 - 优先生成最底层内容"""
+        logger.info(f"开始生成叶子节点内容，项目ID: {state.project_id}")
+
         try:
-            # 对每个章节进行差异化处理
-            for i, section in enumerate(state.sections):
-                if section.get("content") and section.get("is_generated"):
-                    logger.info(f"差异化处理章节: {section['title']}")
-                    
-                    result = await llm_service.differentiate_content(section["content"])
-                    
-                    if result["status"] == "success":
-                        state.sections[i]["differentiated_content"] = result["differentiated_content"]
-                    else:
-                        logger.error(f"章节差异化失败: {result.get('error')}")
-                        state.sections[i]["differentiated_content"] = section["content"]
-            
+            if not hasattr(state, 'section_tree') or not state.section_tree:
+                state.error = "章节树未构建，无法生成叶子节点内容"
+                return state
+
+            # 获取所有叶子节点
+            leaf_nodes = []
+            for root_node in state.section_tree:
+                leaf_nodes.extend(root_node.get_all_leaf_nodes())
+
+            logger.info(f"找到{len(leaf_nodes)}个叶子节点")
+
+            # 为每个叶子节点生成内容
+            for leaf_node in leaf_nodes:
+                logger.info(f"生成叶子节点内容: {leaf_node.get_path()}")
+
+                result = await llm_service.generate_iptv_section_content(
+                    section_title=leaf_node.title,
+                    section_path=leaf_node.get_path(),
+                    document_content=state.document_content
+                )
+
+                if result["status"] == "success":
+                    leaf_node.content = result["content"]
+                    leaf_node.is_generated = True
+                    logger.info(f"叶子节点内容生成成功: {leaf_node.title}")
+                else:
+                    logger.error(f"叶子节点内容生成失败: {result.get('error')}")
+                    leaf_node.content = ""
+                    leaf_node.is_generated = False
+
+            state.current_step = "generate_leaf_content"
+            state.updated_at = datetime.now()
+            logger.info(f"叶子节点内容生成完成，项目ID: {state.project_id}")
+
+            return state
+
+        except Exception as e:
+            logger.error(f"叶子节点内容生成异常: {e}")
+            state.error = str(e)
+            return state
+    
+    async def _generate_parent_summaries(self, state: WorkflowState) -> WorkflowState:
+        """生成父节点总结 - 基于子节点内容生成上级总结"""
+        logger.info(f"开始生成父节点总结，项目ID: {state.project_id}")
+
+        try:
+            if not hasattr(state, 'section_tree') or not state.section_tree:
+                state.error = "章节树未构建，无法生成父节点总结"
+                return state
+
+            # 从最深层开始，逐层向上生成父节点总结
+            for root_node in state.section_tree:
+                await self._generate_node_summary_recursive(root_node, state.document_content)
+
+            # 更新sections列表
+            state.sections = self._tree_to_sections_list(state.section_tree)
+
+            state.current_step = "generate_parent_summaries"
+            state.updated_at = datetime.now()
+            logger.info(f"父节点总结生成完成，项目ID: {state.project_id}")
+
+            return state
+
+        except Exception as e:
+            logger.error(f"父节点总结生成异常: {e}")
+            state.error = str(e)
+            return state
+
+    async def _generate_node_summary_recursive(self, node: SectionNode, document_content: str):
+        """递归生成节点总结"""
+        # 如果是叶子节点，已经有内容了，直接返回
+        if node.is_leaf:
+            return
+
+        # 先确保所有子节点都有内容
+        for child in node.children:
+            await self._generate_node_summary_recursive(child, document_content)
+
+        # 收集所有子节点的内容
+        children_content = []
+        for child in node.children:
+            if child.content:
+                children_content.append(f"### {child.title}\n{child.content}")
+
+        if children_content:
+            # 生成父节点总结
+            logger.info(f"生成父节点总结: {node.get_path()}")
+
+            result = await llm_service.generate_parent_summary(
+                parent_title=node.title,
+                parent_path=node.get_path(),
+                children_content="\n\n".join(children_content),
+                document_content=document_content
+            )
+
+            if result["status"] == "success":
+                node.content = result["content"]
+                node.is_generated = True
+                logger.info(f"父节点总结生成成功: {node.title}")
+            else:
+                logger.error(f"父节点总结生成失败: {result.get('error')}")
+                node.content = ""
+                node.is_generated = False
+    
+    async def _differentiate_content(self, state: WorkflowState) -> WorkflowState:
+        """差异化处理节点 - 对所有生成的内容进行差异化"""
+        logger.info(f"开始差异化处理，项目ID: {state.project_id}")
+
+        try:
+            if not hasattr(state, 'section_tree') or not state.section_tree:
+                state.error = "章节树未构建，无法进行差异化处理"
+                return state
+
+            # 对所有节点进行差异化处理
+            for root_node in state.section_tree:
+                await self._differentiate_node_recursive(root_node)
+
+            # 更新sections列表
+            state.sections = self._tree_to_sections_list(state.section_tree)
+
             state.current_step = "differentiate_content"
             state.updated_at = datetime.now()
             logger.info(f"差异化处理完成，项目ID: {state.project_id}")
-            
+
             return state
-            
+
         except Exception as e:
             logger.error(f"差异化处理异常: {e}")
             state.error = str(e)
             return state
-    
+
+    async def _differentiate_node_recursive(self, node: SectionNode):
+        """递归对节点进行差异化处理"""
+        # 处理当前节点
+        if node.content and node.is_generated:
+            logger.info(f"差异化处理节点: {node.title}")
+
+            result = await llm_service.differentiate_content(node.content)
+
+            if result["status"] == "success":
+                node.differentiated_content = result["differentiated_content"]
+            else:
+                logger.error(f"节点差异化失败: {result.get('error')}")
+                node.differentiated_content = node.content
+
+        # 递归处理子节点
+        for child in node.children:
+            await self._differentiate_node_recursive(child)
+
     async def _finalize(self, state: WorkflowState) -> WorkflowState:
         """完成节点"""
         logger.info(f"工作流完成，项目ID: {state.project_id}")
-        
+
         state.current_step = "completed"
         state.updated_at = datetime.now()
-        
+
         return state
     
     def _should_differentiate(self, state: WorkflowState) -> str:
@@ -202,41 +350,97 @@ class WorkflowEngine:
             return "differentiate"
         else:
             return "finalize"
-    
-    def _parse_outline_to_sections(self, outline: str) -> List[Dict[str, Any]]:
-        """解析提纲为章节列表"""
-        sections = []
+
+    def _parse_outline_to_tree(self, outline: str) -> List[SectionNode]:
+        """解析提纲为层次化的章节树"""
         lines = outline.split('\n')
-        
-        for i, line in enumerate(lines):
+        root_nodes = []
+        node_stack = []  # 用于跟踪当前层级的节点栈
+        order_counter = 0
+
+        for line in lines:
             line = line.strip()
             if not line:
                 continue
-                
-            # 简单的章节解析逻辑
-            if line.startswith('##'):
-                level = 2
-                title = line.replace('##', '').strip()
-            elif line.startswith('#'):
+
+            # 检测标题级别
+            level = 0
+            title = line
+
+            # 检测markdown格式的标题
+            if line.startswith('#'):
+                level = len(line) - len(line.lstrip('#'))
+                title = line.lstrip('#').strip()
+            # 检测数字编号格式
+            elif re.match(r'^\d+\.', line):
                 level = 1
-                title = line.replace('#', '').strip()
-            elif line.startswith('###'):
+                title = re.sub(r'^\d+\.\s*', '', line)
+            elif re.match(r'^\d+\.\d+', line):
+                level = 2
+                title = re.sub(r'^\d+\.\d+\s*', '', line)
+            elif re.match(r'^\d+\.\d+\.\d+', line):
                 level = 3
-                title = line.replace('###', '').strip()
+                title = re.sub(r'^\d+\.\d+\.\d+\s*', '', line)
+            # 检测缩进格式
+            elif line.startswith('    '):
+                level = 3
+                title = line.strip()
+            elif line.startswith('  '):
+                level = 2
+                title = line.strip()
             else:
+                level = 1
+                title = line.strip()
+
+            if not title:
                 continue
-            
+
+            order_counter += 1
+            node = SectionNode(title, level, order_counter)
+
+            # 调整节点栈，移除比当前级别高的节点
+            while node_stack and node_stack[-1].level >= level:
+                node_stack.pop()
+
+            # 如果栈为空，这是根节点
+            if not node_stack:
+                root_nodes.append(node)
+            else:
+                # 添加到父节点
+                parent = node_stack[-1]
+                parent.add_child(node)
+
+            # 将当前节点加入栈
+            node_stack.append(node)
+
+        return root_nodes
+    
+    def _tree_to_sections_list(self, tree: List[SectionNode]) -> List[Dict[str, Any]]:
+        """将章节树转换为扁平的章节列表"""
+        sections = []
+
+        def traverse_node(node: SectionNode):
+            # 添加当前节点
             sections.append({
-                "title": title,
-                "level": level,
-                "order": len(sections) + 1,
-                "requirements": "",
-                "content": "",
-                "differentiated_content": "",
-                "is_generated": False,
-                "is_approved": False
+                "title": node.title,
+                "level": node.level,
+                "order": node.order,
+                "path": node.get_path(),
+                "content": node.content,
+                "differentiated_content": getattr(node, 'differentiated_content', ''),
+                "is_generated": node.is_generated,
+                "is_leaf": node.is_leaf,
+                "children_count": len(node.children)
             })
-        
+
+            # 递归遍历子节点
+            for child in node.children:
+                traverse_node(child)
+
+        # 遍历所有根节点
+        for root_node in tree:
+            traverse_node(root_node)
+
         return sections
     
     async def run_workflow(self, initial_state: WorkflowState) -> WorkflowState:

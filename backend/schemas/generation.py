@@ -6,6 +6,7 @@ class GenerationRequest(BaseModel):
     """完整生成请求"""
     project_id: str = Field(..., description="项目ID")
     document_path: str = Field(..., description="招标文档路径")
+    template_path: Optional[str] = Field(None, description="模板文档路径")
 
 
 class OutlineGenerationRequest(BaseModel):

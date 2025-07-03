@@ -202,6 +202,153 @@ class LLMService:
                 "error": str(e)
             }
 
+    async def generate_iptv_outline(self, document_content: str) -> Dict[str, Any]:
+        """生成IPTV领域的投标方案提纲 - 使用优化的prompt"""
+        system_prompt = """
+        我的顶层目标，是编写一份投标方案的技术方案部分；
+        你需要扮演一位广电IPTV领域的行业专家，解决方案达人；
+        需要注意，后续所有的工作，都要紧密围绕上传的招标方案，尤其避免出现编写方案时自由发挥和扩散的情况。因此，你始终要记住这份方案的内容；
+        然后，你输出一份完整的投标技术方案的完整提纲，提纲要求完整扫描用户需求，结构化安排章节内容，提纲的各子章节不能有漏项；
+        由于公司有固定模板，因此提纲不要编排包含"售后"、"验收"和"质量保障"相关的章节；
+        输出提纲时，不要加说明性文字。
+
+        输出格式要求：
+        - 使用markdown格式的标题层级
+        - 一级标题用 #
+        - 二级标题用 ##
+        - 三级标题用 ###
+        - 四级标题用 ####
+        - 确保层次结构清晰
+        - 不要添加任何说明性文字，只输出提纲结构
+        """
+
+        user_prompt = f"招标内容如下：\n\n{document_content}"
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
+            ]
+
+            response = await self.llm.ainvoke(messages)
+
+            return {
+                "outline": response.content,
+                "status": "success"
+            }
+        except Exception as e:
+            logger.error(f"IPTV提纲生成失败: {e}")
+            return {
+                "outline": "",
+                "status": "error",
+                "error": str(e)
+            }
+
+    async def generate_iptv_section_content(self, section_title: str, section_path: str,
+                                          document_content: str) -> Dict[str, Any]:
+        """生成IPTV领域的章节内容 - 使用优化的prompt"""
+        system_prompt = """
+        我的顶层目标，是编写一份投标方案的技术方案部分；
+        你需要扮演一位广电IPTV领域的行业专家，解决方案达人；
+        需要注意，后续所有的工作，都要紧密围绕上传的招标方案，尤其避免出现编写方案时自由发挥和扩散的情况。因此，你始终要记住这份方案的内容；
+        编制内容时，方案应尽可能贴合招标方案中提到的需求点，围绕需求点展开设计描述，但不要直接照抄原文；
+        涉及到技术实现的描述，应该更加偏逻辑描述，避免提到非常具体的技术栈；
+        涉及到需要架构设计的内容，应用plantuml(mermaid/Graphviz)的代码输出架构设计；
+        涉及到需要业务流程或系统流程、时序图等内容，同样用plantuml(mermaid/Graphviz)的代码输出流程设计。
+
+        内容要求：
+        1. 专业性强，术语使用准确
+        2. 逻辑清晰，结构合理
+        3. 紧密贴合招标需求
+        4. 避免虚构和夸大
+        5. 字数控制在800-1500字
+        6. 如需图表，使用mermaid代码块
+        """
+
+        user_prompt = f"""
+        章节标题如下：{section_title}
+        章节路径：{section_path}
+
+        招标内容如下：
+        {document_content}
+
+        请为该章节生成专业的技术方案内容。
+        """
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
+            ]
+
+            response = await self.llm.ainvoke(messages)
+
+            return {
+                "content": response.content,
+                "status": "success"
+            }
+        except Exception as e:
+            logger.error(f"IPTV章节内容生成失败: {e}")
+            return {
+                "content": "",
+                "status": "error",
+                "error": str(e)
+            }
+
+    async def generate_parent_summary(self, parent_title: str, parent_path: str,
+                                    children_content: str, document_content: str) -> Dict[str, Any]:
+        """生成父节点总结内容"""
+        system_prompt = """
+        你是一位资深的技术方案编写专家，精通广电IPTV领域。
+        现在需要你为一个父级章节生成总结性内容，该内容需要：
+
+        1. 基于所有子章节的内容进行总结和串联
+        2. 提供该章节的整体概述和核心要点
+        3. 确保逻辑连贯，承上启下
+        4. 突出该章节在整个方案中的作用和价值
+        5. 保持与招标需求的紧密关联
+        6. 字数控制在500-800字
+
+        注意：
+        - 不要简单重复子章节内容
+        - 要有总结性和概括性
+        - 体现章节间的逻辑关系
+        - 突出重点和亮点
+        """
+
+        user_prompt = f"""
+        父章节标题：{parent_title}
+        章节路径：{parent_path}
+
+        子章节内容如下：
+        {children_content}
+
+        招标需求参考：
+        {document_content[:2000]}...
+
+        请生成该父章节的总结性内容。
+        """
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
+            ]
+
+            response = await self.llm.ainvoke(messages)
+
+            return {
+                "content": response.content,
+                "status": "success"
+            }
+        except Exception as e:
+            logger.error(f"父节点总结生成失败: {e}")
+            return {
+                "content": "",
+                "status": "error",
+                "error": str(e)
+            }
+
 
 # 全局实例
 llm_service = LLMService()

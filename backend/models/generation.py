@@ -55,18 +55,24 @@ class WorkflowState(BaseModel):
     """工作流状态模型"""
     project_id: str = Field(..., description="项目ID")
     current_step: str = Field(..., description="当前步骤")
-    
+
     # 数据状态
     document_content: Optional[str] = Field(None, description="文档内容")
     requirements_analysis: Optional[str] = Field(None, description="需求分析")
     outline: Optional[str] = Field(None, description="方案提纲")
     sections: List[Dict[str, Any]] = Field(default_factory=list, description="章节列表")
-    
+
+    # 新增：章节树结构（用于层次化处理）
+    section_tree: Optional[Any] = Field(None, description="章节树结构")
+
     # 配置
     enable_differentiation: bool = Field(default=True, description="启用差异化")
-    
+
     # 错误信息
     error: Optional[str] = Field(None, description="错误信息")
-    
+
     # 时间戳
     updated_at: datetime = Field(default_factory=datetime.now)
+
+    class Config:
+        arbitrary_types_allowed = True  # 允许任意类型（用于section_tree）
