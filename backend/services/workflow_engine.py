@@ -346,10 +346,11 @@ class WorkflowEngine:
     
     def _should_differentiate(self, state: WorkflowState) -> str:
         """判断是否需要差异化处理"""
-        if state.enable_differentiation:
-            return "differentiate"
-        else:
-            return "finalize"
+        # if state.enable_differentiation:
+        #     return "differentiate"
+        # else:
+        #     return "finalize"
+        return "finalize"
 
     def _parse_outline_to_tree(self, outline: str) -> List[SectionNode]:
         """解析提纲为层次化的章节树"""
