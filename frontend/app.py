@@ -119,19 +119,13 @@ class AIBiddingApp:
 
     def start_full_generation(self, tender_file_path: str, template_file_path: str = None) -> Tuple[str, gr.update]:
         """启动完整方案生成"""
+        if not self.current_project_id:
+            return "❌ 请先创建项目", gr.update(visible=False)
+
         if not tender_file_path:
             return "❌ 请先上传招标文档", gr.update(visible=False)
 
         try:
-            # 自动创建项目（简化流程）
-            if not self.current_project_id:
-                project_result = self.create_project("AI生成项目", "自动创建的项目", True)
-                if "❌" in project_result:
-                    return f"❌ 项目创建失败: {project_result}", gr.update(visible=False)
-                # 确保项目ID已设置
-                if not self.current_project_id:
-                    return "❌ 项目ID获取失败", gr.update(visible=False)
-
             # 使用实际上传的文档路径
             data = {
                 "project_id": self.current_project_id,
@@ -269,9 +263,29 @@ def create_interface():
     with gr.Blocks(title="AI投标方案生成系统", theme=gr.themes.Soft()) as interface:
         gr.Markdown("# 🤖 AI投标方案生成系统")
         gr.Markdown("基于AI的投标方案辅助生成系统，帮助您快速生成高质量的IPTV技术方案")
-        gr.Markdown("### 📋 使用说明：上传招标文档 → 可选上传模板 → 点击生成 → 下载投标书")
+        gr.Markdown("### 📋 使用说明：创建项目 → 上传招标文档 → 可选上传模板 → 点击生成 → 下载投标书")
+
+        # 项目创建区域
+        gr.Markdown("## 📋 项目管理")
+        with gr.Row():
+            with gr.Column(scale=2):
+                project_name = gr.Textbox(label="项目名称", placeholder="请输入项目名称")
+                project_desc = gr.Textbox(label="项目描述", placeholder="请输入项目描述（可选）", lines=2)
+                enable_diff = gr.Checkbox(label="启用差异化处理", value=True)
+                create_btn = gr.Button("创建项目", variant="primary")
+
+            with gr.Column(scale=1):
+                project_status = gr.Textbox(label="项目状态", interactive=False)
+
+        create_btn.click(
+            app.create_project,
+            inputs=[project_name, project_desc, enable_diff],
+            outputs=[project_status]
+        )
 
         # 文档上传区域
+        gr.Markdown("---")
+        gr.Markdown("## 📄 文档上传")
         with gr.Row():
             with gr.Column():
                 gr.Markdown("### 📄 招标文档 (必需)")
@@ -301,6 +315,7 @@ def create_interface():
 
         # 生成控制区域
         gr.Markdown("---")
+        gr.Markdown("## 🚀 投标书生成")
         with gr.Row():
             with gr.Column(scale=2):
                 generate_btn = gr.Button("🎯 开始生成投标书", variant="primary", size="lg")
@@ -320,11 +335,12 @@ def create_interface():
                 status_btn = gr.Button("🔄 刷新状态", variant="secondary")
                 gr.Markdown("### 📝 操作说明")
                 gr.Markdown("""
-                1. 上传招标文档（必需）
-                2. 可选择上传模板文档
-                3. 点击"开始生成投标书"
-                4. 观察进度条更新
-                5. 生成完成后下载投标书
+                1. 创建项目
+                2. 上传招标文档（必需）
+                3. 可选择上传模板文档
+                4. 点击"开始生成投标书"
+                5. 观察进度条更新
+                6. 生成完成后下载投标书
 
                 ⏱️ 预计用时：5-15分钟
                 """)
