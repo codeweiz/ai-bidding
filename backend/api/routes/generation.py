@@ -6,10 +6,21 @@ from datetime import datetime
 from backend.models.project import ProjectStatus
 from backend.services.content_generator import content_generator
 from backend.schemas.generation import (
-    GenerationRequest, 
+    GenerationRequest,
     OutlineGenerationRequest,
     SectionGenerationRequest
 )
+
+# 进度跟踪回调函数
+def update_task_progress(task_id: str, progress: int, step: str, error: str = None):
+    """更新任务进度"""
+    if task_id in generation_tasks:
+        generation_tasks[task_id]["progress"] = progress
+        generation_tasks[task_id]["current_step"] = step
+        if error:
+            generation_tasks[task_id]["status"] = "failed"
+            generation_tasks[task_id]["error"] = error
+        generation_tasks[task_id]["updated_at"] = datetime.now()
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +66,8 @@ async def generate_full_proposal(
             _run_full_generation_task,
             task_id,
             project,
-            request.document_path
+            request.document_path,
+            request.template_path
         )
         
         return {
@@ -155,17 +167,16 @@ async def list_output_files() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _run_full_generation_task(task_id: str, project, document_path: str):
+async def _run_full_generation_task(task_id: str, project, document_path: str, template_path: str = None):
     """运行完整生成任务（后台任务）"""
     try:
         logger.info(f"开始执行生成任务: {task_id}")
-        
+
         # 更新任务状态
-        generation_tasks[task_id]["progress"] = 10
-        generation_tasks[task_id]["current_step"] = "解析文档"
-        
+        update_task_progress(task_id, 10, "解析招标文档")
+
         # 执行生成
-        result = await content_generator.generate_proposal(project, document_path)
+        result = await content_generator.generate_proposal(project, document_path, template_path)
         
         if result["status"] == "success":
             # 更新项目信息

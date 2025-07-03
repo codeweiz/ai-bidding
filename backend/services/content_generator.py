@@ -3,6 +3,7 @@ import logging
 import asyncio
 from pathlib import Path
 from datetime import datetime
+import re
 
 from docx import Document
 from docx.shared import Inches
@@ -18,20 +19,22 @@ logger = logging.getLogger(__name__)
 
 class ContentGenerator:
     """内容生成器，负责整个生成流程的协调"""
-    
+
     def __init__(self):
         self.output_dir = Path("outputs")
         self.output_dir.mkdir(exist_ok=True)
+        self.default_template_path = Path("tests/data/投标文件template.docx")
     
-    async def generate_proposal(self, project: Project, document_path: str) -> Dict[str, Any]:
+    async def generate_proposal(self, project: Project, document_path: str,
+                              template_path: Optional[str] = None) -> Dict[str, Any]:
         """生成完整的投标方案"""
         logger.info(f"开始生成投标方案，项目: {project.name}")
-        
+
         try:
             # 1. 解析文档
             document_result = document_parser.parse_document(Path(document_path))
             document_content = "\n".join([doc.page_content for doc in document_result["documents"]])
-            
+
             # 2. 创建工作流状态
             workflow_state = WorkflowState(
                 project_id=project.id or "unknown",
@@ -39,7 +42,7 @@ class ContentGenerator:
                 document_content=document_content,
                 enable_differentiation=project.enable_differentiation
             )
-            
+
             # 3. 运行工作流
             final_state = await workflow_engine.run_workflow(workflow_state)
 
@@ -54,8 +57,8 @@ class ContentGenerator:
                     "error": final_state.error
                 }
 
-            # 4. 生成Word文档
-            word_doc_path = await self._generate_word_document(project, final_state)
+            # 4. 生成Word文档（使用模板）
+            word_doc_path = await self._generate_word_document(project, final_state, template_path)
 
             return {
                 "status": "success",
@@ -64,7 +67,7 @@ class ContentGenerator:
                 "sections": final_state.sections,
                 "document_path": str(word_doc_path)
             }
-            
+
         except Exception as e:
             logger.error(f"生成投标方案失败: {e}")
             return {
@@ -72,56 +75,117 @@ class ContentGenerator:
                 "error": str(e)
             }
     
-    async def _generate_word_document(self, project: Project, state: WorkflowState) -> Path:
-        """生成Word文档"""
+    async def _generate_word_document(self, project: Project, state: WorkflowState,
+                                     template_path: Optional[str] = None) -> Path:
+        """生成Word文档 - 使用模板样式"""
         logger.info(f"开始生成Word文档，项目: {project.name}")
-        
-        # 创建Word文档
-        doc = Document()
-        
+
+        # 确定模板路径
+        if template_path and Path(template_path).exists():
+            template_doc_path = Path(template_path)
+        else:
+            template_doc_path = self.default_template_path
+
+        if not template_doc_path.exists():
+            logger.warning(f"模板文件不存在: {template_doc_path}，使用空白文档")
+            doc = Document()
+        else:
+            logger.info(f"使用模板: {template_doc_path}")
+            doc = Document(str(template_doc_path))
+
+        # 清空模板内容，保留样式
+        for paragraph in doc.paragraphs[:]:
+            p = paragraph._element
+            p.getparent().remove(p)
+
         # 添加标题
-        title = doc.add_heading(f'{project.name} - 技术方案', 0)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
+        title_para = doc.add_paragraph(f'{project.name} - 技术方案')
+        if self._has_style(doc, "标书1级"):
+            title_para.style = "标书1级"
+        else:
+            title_para.style = "Heading 1"
+        title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
         # 添加目录占位符
-        doc.add_heading('目录', level=1)
+        toc_para = doc.add_paragraph('目录')
+        if self._has_style(doc, "标书2级"):
+            toc_para.style = "标书2级"
+        else:
+            toc_para.style = "Heading 2"
+
         doc.add_paragraph('（此处应插入自动生成的目录）')
         doc.add_page_break()
-        
+
         # 添加章节内容
         for section in state.sections:
             if not section.get("is_generated"):
                 continue
-                
-            # 添加章节标题
-            if section["level"] == 1:
-                doc.add_heading(section["title"], level=1)
-            elif section["level"] == 2:
-                doc.add_heading(section["title"], level=2)
+
+            # 添加章节标题 - 使用模板样式
+            title_para = doc.add_paragraph(section["title"])
+            style_name = self._get_title_style(section["level"])
+            if self._has_style(doc, style_name):
+                title_para.style = style_name
             else:
-                doc.add_heading(section["title"], level=3)
-            
+                # 回退到标准样式
+                title_para.style = f"Heading {min(section['level'], 9)}"
+
             # 添加章节内容
             content = section.get("differentiated_content") or section.get("content", "")
             if content:
+                # 处理内容，支持mermaid代码块
+                processed_content = self._process_content_with_diagrams(content)
+
                 # 按段落分割内容
-                paragraphs = content.split('\n\n')
+                paragraphs = processed_content.split('\n\n')
                 for para in paragraphs:
-                    if para.strip():
-                        doc.add_paragraph(para.strip())
-            
-            # 添加一些间距
-            doc.add_paragraph()
-        
+                    para = para.strip()
+                    if para:
+                        # 检查是否是代码块
+                        if para.startswith('```') and para.endswith('```'):
+                            # 代码块使用等宽字体
+                            code_para = doc.add_paragraph(para)
+                            code_para.style = "Normal"
+                        else:
+                            # 正文使用标书正文样式
+                            content_para = doc.add_paragraph(para)
+                            if self._has_style(doc, "标书正文"):
+                                content_para.style = "标书正文"
+                            else:
+                                content_para.style = "Normal"
+
         # 保存文档
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{project.name}_{timestamp}.docx"
         file_path = self.output_dir / filename
-        
+
         doc.save(str(file_path))
         logger.info(f"Word文档生成完成: {file_path}")
-        
+
         return file_path
+
+    def _has_style(self, doc: Document, style_name: str) -> bool:
+        """检查文档是否有指定样式"""
+        try:
+            for style in doc.styles:
+                if style.name == style_name:
+                    return True
+            return False
+        except:
+            return False
+
+    def _get_title_style(self, level: int) -> str:
+        """根据级别获取标题样式名称"""
+        if level <= 5:
+            return f"标书{level}级"
+        else:
+            return "标书5级"  # 超过5级的都用5级样式
+
+    def _process_content_with_diagrams(self, content: str) -> str:
+        """处理内容中的图表代码"""
+        # 这里可以后续扩展，将mermaid代码转换为图片
+        # 目前先保持原样
+        return content
     
     async def analyze_requirements_only(self, document_path: str) -> Dict[str, Any]:
         """仅分析需求，不生成完整方案"""

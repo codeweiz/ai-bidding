@@ -1,4 +1,6 @@
-from typing import Tuple
+from typing import Tuple, Optional
+import time
+import threading
 
 import gradio as gr
 import requests
@@ -13,11 +15,13 @@ class AIBiddingApp:
     def __init__(self):
         self.current_project_id = None
         self.current_task_id = None
+        self.progress_thread = None
+        self.stop_progress = False
 
     def upload_document(self, file) -> Tuple[str, str]:
         """上传招标文档"""
         if file is None:
-            return "请选择文件", ""
+            return "请选择招标文档", ""
 
         try:
             files = {"file": (file.name, open(file.name, "rb"))}
@@ -25,12 +29,30 @@ class AIBiddingApp:
 
             if response.status_code == 200:
                 result = response.json()
-                return f"✅ 文档上传成功: {result['file_name']}", result['file_path']
+                return f"✅ 招标文档上传成功: {result['file_name']}", result['file_path']
             else:
                 return f"❌ 上传失败: {response.text}", ""
 
         except Exception as e:
             return f"❌ 上传异常: {str(e)}", ""
+
+    def upload_template(self, file) -> Tuple[str, str]:
+        """上传模板文档"""
+        if file is None:
+            return "使用默认模板", ""
+
+        try:
+            files = {"file": (file.name, open(file.name, "rb"))}
+            response = requests.post(f"{API_BASE_URL}/documents/upload", files=files)
+
+            if response.status_code == 200:
+                result = response.json()
+                return f"✅ 模板上传成功: {result['file_name']}", result['file_path']
+            else:
+                return f"❌ 模板上传失败: {response.text}", ""
+
+        except Exception as e:
+            return f"❌ 模板上传异常: {str(e)}", ""
 
     def analyze_document(self, file_path: str) -> Tuple[str, str]:
         """分析文档需求"""
@@ -95,18 +117,26 @@ class AIBiddingApp:
         except Exception as e:
             return f"❌ 生成异常: {str(e)}", ""
 
-    def start_full_generation(self, file_path: str) -> str:
+    def start_full_generation(self, tender_file_path: str, template_file_path: str = None) -> Tuple[str, gr.update]:
         """启动完整方案生成"""
-        if not self.current_project_id:
-            return "请先创建项目"
-
-        if not file_path:
-            return "请先上传文档"
+        if not tender_file_path:
+            return "❌ 请先上传招标文档", gr.update(visible=False)
 
         try:
+            # 自动创建项目（简化流程）
+            if not self.current_project_id:
+                project_result = self.create_project("AI生成项目", "自动创建的项目", True)
+                if "❌" in project_result:
+                    return f"❌ 项目创建失败: {project_result}", gr.update(visible=False)
+                # 确保项目ID已设置
+                if not self.current_project_id:
+                    return "❌ 项目ID获取失败", gr.update(visible=False)
+
+            # 使用实际上传的文档路径
             data = {
                 "project_id": self.current_project_id,
-                "document_path": file_path
+                "document_path": tender_file_path,  # 使用实际上传的文档路径
+                "template_path": template_file_path if template_file_path else None
             }
 
             response = requests.post(f"{API_BASE_URL}/generation/full", json=data)
@@ -114,17 +144,43 @@ class AIBiddingApp:
             if response.status_code == 200:
                 result = response.json()
                 self.current_task_id = result['task_id']
-                return f"✅ 生成任务已启动，任务ID: {result['task_id']}"
+
+                # 启动进度监控
+                self.start_progress_monitoring()
+
+                return f"✅ 生成任务已启动，正在处理您上传的招标文档...", gr.update(visible=True)
             else:
-                return f"❌ 启动失败: {response.text}"
+                return f"❌ 启动失败: {response.text}", gr.update(visible=False)
 
         except Exception as e:
-            return f"❌ 启动异常: {str(e)}"
+            return f"❌ 启动异常: {str(e)}", gr.update(visible=False)
 
-    def check_task_status(self) -> str:
+    def start_progress_monitoring(self):
+        """启动进度监控线程"""
+        self.stop_progress = False
+        if self.progress_thread and self.progress_thread.is_alive():
+            self.stop_progress = True
+            self.progress_thread.join()
+
+        self.progress_thread = threading.Thread(target=self._monitor_progress)
+        self.progress_thread.daemon = True
+        self.progress_thread.start()
+
+    def _monitor_progress(self):
+        """监控进度的后台线程"""
+        while not self.stop_progress and self.current_task_id:
+            try:
+                status_info = self.check_task_status()
+                if "完成" in status_info or "失败" in status_info:
+                    break
+                time.sleep(2)  # 每2秒检查一次
+            except:
+                break
+
+    def check_task_status(self) -> Tuple[str, int, gr.update]:
         """检查任务状态"""
         if not self.current_task_id:
-            return "没有正在运行的任务"
+            return "没有正在运行的任务", 0, gr.update(visible=False)
 
         try:
             response = requests.get(f"{API_BASE_URL}/generation/task/{self.current_task_id}")
@@ -136,21 +192,49 @@ class AIBiddingApp:
                 status = task['status']
                 progress = task.get('progress', 0)
                 current_step = task.get('current_step', '')
+                error = task.get('error', '')
 
                 if status == "running":
-                    return f"🔄 任务进行中... 进度: {progress}% - {current_step}"
+                    status_text = f"🔄 任务进行中... {current_step}"
+                    return status_text, progress, gr.update(visible=False)
                 elif status == "completed":
-                    return f"✅ 任务完成! 进度: {progress}%"
+                    status_text = f"✅ 任务完成! 可以下载投标书了"
+                    self.stop_progress = True
+                    return status_text, 100, gr.update(visible=True)
                 elif status == "failed":
-                    error = task.get('error', '未知错误')
-                    return f"❌ 任务失败: {error}"
+                    status_text = f"❌ 任务失败: {error}"
+                    self.stop_progress = True
+                    return status_text, 0, gr.update(visible=False)
                 else:
-                    return f"📋 任务状态: {status}"
+                    return f"📋 任务状态: {status}", progress, gr.update(visible=False)
             else:
-                return f"❌ 查询失败: {response.text}"
+                return f"❌ 查询失败: {response.text}", 0, gr.update(visible=False)
 
         except Exception as e:
-            return f"❌ 查询异常: {str(e)}"
+            return f"❌ 查询异常: {str(e)}", 0, gr.update(visible=False)
+
+    def download_result(self) -> str:
+        """下载生成的投标书"""
+        if not self.current_project_id:
+            return "❌ 没有可下载的文件"
+
+        try:
+            # 获取项目信息
+            response = requests.get(f"{API_BASE_URL}/projects/{self.current_project_id}")
+
+            if response.status_code == 200:
+                project = response.json()
+                if project.get('final_document_path'):
+                    # 返回下载链接信息
+                    download_url = f"http://localhost:8000/api/projects/{self.current_project_id}/download"
+                    return f"✅ 文件准备就绪！请访问下载链接：{download_url}"
+                else:
+                    return "❌ 文件尚未生成"
+            else:
+                return f"❌ 获取项目信息失败: {response.text}"
+
+        except Exception as e:
+            return f"❌ 下载异常: {str(e)}"
 
     def get_output_files(self) -> str:
         """获取输出文件列表"""
@@ -184,99 +268,88 @@ def create_interface():
 
     with gr.Blocks(title="AI投标方案生成系统", theme=gr.themes.Soft()) as interface:
         gr.Markdown("# 🤖 AI投标方案生成系统")
-        gr.Markdown("基于AI的投标方案辅助生成系统，帮助您快速生成高质量的技术方案")
+        gr.Markdown("基于AI的投标方案辅助生成系统，帮助您快速生成高质量的IPTV技术方案")
+        gr.Markdown("### 📋 使用说明：上传招标文档 → 可选上传模板 → 点击生成 → 下载投标书")
 
-        with gr.Tab("📁 项目管理"):
-            with gr.Row():
-                with gr.Column():
-                    project_name = gr.Textbox(label="项目名称", placeholder="请输入项目名称")
-                    project_desc = gr.Textbox(label="项目描述", placeholder="请输入项目描述（可选）", lines=3)
-                    enable_diff = gr.Checkbox(label="启用差异化处理", value=True)
-                    create_btn = gr.Button("创建项目", variant="primary")
+        # 文档上传区域
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("### 📄 招标文档 (必需)")
+                tender_file = gr.File(label="选择招标文档", file_types=[".pdf", ".docx", ".doc"])
+                tender_upload_btn = gr.Button("上传招标文档", variant="primary")
+                tender_status = gr.Textbox(label="招标文档状态", interactive=False)
+                tender_path = gr.Textbox(label="招标文档路径", interactive=False, visible=False)
 
-                with gr.Column():
-                    project_status = gr.Textbox(label="项目状态", interactive=False)
+            with gr.Column():
+                gr.Markdown("### 📋 模板文档 (可选)")
+                template_file = gr.File(label="选择模板文档", file_types=[".docx"])
+                template_upload_btn = gr.Button("上传模板文档", variant="secondary")
+                template_status = gr.Textbox(label="模板状态", interactive=False, value="使用默认模板")
+                template_path = gr.Textbox(label="模板路径", interactive=False, visible=False)
 
-            create_btn.click(
-                app.create_project,
-                inputs=[project_name, project_desc, enable_diff],
-                outputs=[project_status]
-            )
+        tender_upload_btn.click(
+            app.upload_document,
+            inputs=[tender_file],
+            outputs=[tender_status, tender_path]
+        )
 
-        with gr.Tab("📄 文档处理"):
-            with gr.Row():
-                with gr.Column():
-                    file_upload = gr.File(label="上传招标文档", file_types=[".pdf", ".docx", ".doc"])
-                    upload_btn = gr.Button("上传文档", variant="primary")
-                    analyze_btn = gr.Button("分析需求", variant="secondary")
+        template_upload_btn.click(
+            app.upload_template,
+            inputs=[template_file],
+            outputs=[template_status, template_path]
+        )
 
-                with gr.Column():
-                    upload_status = gr.Textbox(label="上传状态", interactive=False)
-                    file_path = gr.Textbox(label="文件路径", interactive=False, visible=False)
+        # 生成控制区域
+        gr.Markdown("---")
+        with gr.Row():
+            with gr.Column(scale=2):
+                generate_btn = gr.Button("🎯 开始生成投标书", variant="primary", size="lg")
+                generation_status = gr.Textbox(label="生成状态", interactive=False, value="等待开始...")
 
-            with gr.Row():
-                analysis_result = gr.Textbox(label="需求分析结果", lines=10, interactive=False)
+                # 进度条
+                progress_bar = gr.Slider(
+                    minimum=0, maximum=100, value=0, step=1,
+                    label="生成进度", interactive=False, visible=False
+                )
 
-            upload_btn.click(
-                app.upload_document,
-                inputs=[file_upload],
-                outputs=[upload_status, file_path]
-            )
+                # 下载按钮
+                download_btn = gr.Button("📥 下载投标书", variant="success", visible=False)
+                download_status = gr.Textbox(label="下载状态", interactive=False)
 
-            analyze_btn.click(
-                app.analyze_document,
-                inputs=[file_path],
-                outputs=[upload_status, analysis_result]
-            )
+            with gr.Column(scale=1):
+                status_btn = gr.Button("🔄 刷新状态", variant="secondary")
+                gr.Markdown("### 📝 操作说明")
+                gr.Markdown("""
+                1. 上传招标文档（必需）
+                2. 可选择上传模板文档
+                3. 点击"开始生成投标书"
+                4. 观察进度条更新
+                5. 生成完成后下载投标书
 
-        with gr.Tab("📝 方案生成"):
-            with gr.Row():
-                with gr.Column():
-                    outline_btn = gr.Button("生成提纲", variant="secondary")
-                    generate_btn = gr.Button("开始完整生成", variant="primary")
-                    status_btn = gr.Button("检查状态", variant="secondary")
+                ⏱️ 预计用时：5-15分钟
+                """)
 
-                with gr.Column():
-                    generation_status = gr.Textbox(label="生成状态", interactive=False)
+        generate_btn.click(
+            app.start_full_generation,
+            inputs=[tender_path, template_path],
+            outputs=[generation_status, progress_bar]
+        )
 
-            with gr.Row():
-                outline_result = gr.Textbox(label="方案提纲", lines=15, interactive=False)
+        status_btn.click(
+            app.check_task_status,
+            outputs=[generation_status, progress_bar, download_btn]
+        )
 
-            outline_btn.click(
-                app.generate_outline,
-                inputs=[analysis_result],
-                outputs=[generation_status, outline_result]
-            )
+        download_btn.click(
+            app.download_result,
+            outputs=[download_status]
+        )
 
-            generate_btn.click(
-                app.start_full_generation,
-                inputs=[file_path],
-                outputs=[generation_status]
-            )
-
-            status_btn.click(
-                app.check_task_status,
-                outputs=[generation_status]
-            )
-
-        with gr.Tab("📋 输出管理"):
-            with gr.Row():
-                with gr.Column():
-                    refresh_btn = gr.Button("刷新文件列表", variant="secondary")
-
-                with gr.Column():
-                    pass
-
-            with gr.Row():
-                output_files = gr.Textbox(label="输出文件列表", lines=10, interactive=False)
-
-            refresh_btn.click(
-                app.get_output_files,
-                outputs=[output_files]
-            )
-
-            # 页面加载时自动刷新文件列表
-            interface.load(app.get_output_files, outputs=[output_files])
+        # 页面加载时初始化状态
+        interface.load(
+            lambda: ("等待任务启动...", 0, gr.update(visible=False)),
+            outputs=[generation_status, progress_bar, download_btn]
+        )
 
     return interface
 
