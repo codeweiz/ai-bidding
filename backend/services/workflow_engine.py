@@ -346,13 +346,14 @@ class WorkflowEngine:
     
     def _should_differentiate(self, state: WorkflowState) -> str:
         """判断是否需要差异化处理"""
-        if state.enable_differentiation:
-            return "differentiate"
-        else:
-            return "finalize"
+        # if state.enable_differentiation:
+        #     return "differentiate"
+        # else:
+        #     return "finalize"
+        return "finalize"
 
     def _parse_outline_to_tree(self, outline: str) -> List[SectionNode]:
-        """解析提纲为层次化的章节树"""
+        """解析提纲为层次化的章节树 - 专门处理数字编号格式"""
         lines = outline.split('\n')
         root_nodes = []
         node_stack = []  # 用于跟踪当前层级的节点栈
@@ -363,42 +364,16 @@ class WorkflowEngine:
             if not line:
                 continue
 
-            # 检测标题级别
-            level = 0
-            title = line
+            # 解析数字编号格式的标题
+            level, title = self._parse_numbered_title(line)
 
-            # 检测markdown格式的标题
-            if line.startswith('#'):
-                level = len(line) - len(line.lstrip('#'))
-                title = line.lstrip('#').strip()
-            # 检测数字编号格式
-            elif re.match(r'^\d+\.', line):
-                level = 1
-                title = re.sub(r'^\d+\.\s*', '', line)
-            elif re.match(r'^\d+\.\d+', line):
-                level = 2
-                title = re.sub(r'^\d+\.\d+\s*', '', line)
-            elif re.match(r'^\d+\.\d+\.\d+', line):
-                level = 3
-                title = re.sub(r'^\d+\.\d+\.\d+\s*', '', line)
-            # 检测缩进格式
-            elif line.startswith('    '):
-                level = 3
-                title = line.strip()
-            elif line.startswith('  '):
-                level = 2
-                title = line.strip()
-            else:
-                level = 1
-                title = line.strip()
-
-            if not title:
-                continue
+            if level == 0 or not title:
+                continue  # 跳过无法解析的行
 
             order_counter += 1
             node = SectionNode(title, level, order_counter)
 
-            # 调整节点栈，移除比当前级别高的节点
+            # 调整节点栈，移除比当前级别高或相等的节点
             while node_stack and node_stack[-1].level >= level:
                 node_stack.pop()
 
@@ -414,6 +389,33 @@ class WorkflowEngine:
             node_stack.append(node)
 
         return root_nodes
+
+    def _parse_numbered_title(self, line: str) -> tuple[int, str]:
+        """解析数字编号格式的标题，返回(级别, 标题)"""
+        line = line.strip()
+
+        # 匹配各种数字编号格式 - 按照从复杂到简单的顺序匹配
+        patterns = [
+            (r'^(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)\s+(.+)$', 5),  # 1.1.1.1.1 标题
+            (r'^(\d+)\.(\d+)\.(\d+)\.(\d+)\s+(.+)$', 4),         # 1.1.1.1 标题
+            (r'^(\d+)\.(\d+)\.(\d+)\s+(.+)$', 3),                # 1.1.1 标题
+            (r'^(\d+)\.(\d+)\s+(.+)$', 2),                       # 1.1 标题
+            (r'^(\d+)\.\s+(.+)$', 1),                            # 1. 标题
+        ]
+
+        for pattern, level in patterns:
+            match = re.match(pattern, line)
+            if match:
+                # 提取标题部分（最后一个捕获组）
+                title = match.groups()[-1].strip()
+                return level, title
+
+        # 如果没有匹配到数字编号格式，检查是否是纯文本标题
+        if line and not line.startswith('#') and not line.startswith('-') and not line.startswith('*'):
+            # 可能是没有编号的标题，默认为1级
+            return 1, line
+
+        return 0, ""  # 无法解析
     
     def _tree_to_sections_list(self, tree: List[SectionNode]) -> List[Dict[str, Any]]:
         """将章节树转换为扁平的章节列表"""
