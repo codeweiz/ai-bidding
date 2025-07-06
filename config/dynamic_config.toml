@@ -3,7 +3,8 @@
 
 [llm]
 temperature = 0.2
-max_tokens = 400000
+#max_tokens = 65536 reasoner
+max_tokens = 8192
 
 [llm.retry_config]
 max_retries = 3
