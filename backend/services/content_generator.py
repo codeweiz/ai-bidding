@@ -1,18 +1,15 @@
-from typing import Dict, Any, List, Optional
 import logging
-import asyncio
-from pathlib import Path
 from datetime import datetime
-import re
+from pathlib import Path
+from typing import Dict, Any, List, Optional
 
 from docx import Document
-from docx.shared import Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-from backend.models.project import Project, ProjectStatus
 from backend.models.generation import WorkflowState
-from backend.services.workflow_engine import workflow_engine
+from backend.models.project import Project
 from backend.services.document_parser import document_parser
+from backend.services.workflow_engine import workflow_engine
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +21,9 @@ class ContentGenerator:
         self.output_dir = Path("outputs")
         self.output_dir.mkdir(exist_ok=True)
         self.default_template_path = Path("tests/data/投标文件template.docx")
-    
+
     async def generate_proposal(self, project: Project, document_path: str,
-                              template_path: Optional[str] = None) -> Dict[str, Any]:
+                                template_path: Optional[str] = None) -> Dict[str, Any]:
         """生成完整的投标方案"""
         logger.info(f"开始生成投标方案，项目: {project.name}")
 
@@ -74,9 +71,9 @@ class ContentGenerator:
                 "status": "error",
                 "error": str(e)
             }
-    
+
     async def _generate_word_document(self, project: Project, state: WorkflowState,
-                                     template_path: Optional[str] = None) -> Path:
+                                      template_path: Optional[str] = None) -> Path:
         """生成Word文档 - 使用模板样式"""
         logger.info(f"开始生成Word文档，项目: {project.name}")
 
@@ -186,27 +183,27 @@ class ContentGenerator:
         # 这里可以后续扩展，将mermaid代码转换为图片
         # 目前先保持原样
         return content
-    
+
     async def analyze_requirements_only(self, document_path: str) -> Dict[str, Any]:
         """仅分析需求，不生成完整方案"""
         logger.info(f"开始分析需求，文档: {document_path}")
-        
+
         try:
             # 解析文档
             document_result = document_parser.parse_document(Path(document_path))
             document_content = "\n".join([doc.page_content for doc in document_result["documents"]])
-            
+
             # 创建简化的工作流状态
             workflow_state = WorkflowState(
                 project_id="temp",
                 current_step="start",
                 document_content=document_content
             )
-            
+
             # 只运行需求分析步骤
             from backend.services.llm_service import llm_service
             result = await llm_service.analyze_requirements(document_content)
-            
+
             if result["status"] == "success":
                 return {
                     "status": "success",
@@ -223,22 +220,22 @@ class ContentGenerator:
                     "status": "error",
                     "error": result.get("error", "需求分析失败")
                 }
-                
+
         except Exception as e:
             logger.error(f"需求分析失败: {e}")
             return {
                 "status": "error",
                 "error": str(e)
             }
-    
+
     async def generate_outline_only(self, requirements_analysis: str) -> Dict[str, Any]:
         """仅生成提纲"""
         logger.info("开始生成提纲")
-        
+
         try:
             from backend.services.llm_service import llm_service
             result = await llm_service.generate_outline(requirements_analysis)
-            
+
             if result["status"] == "success":
                 return {
                     "status": "success",
@@ -249,23 +246,23 @@ class ContentGenerator:
                     "status": "error",
                     "error": result.get("error", "提纲生成失败")
                 }
-                
+
         except Exception as e:
             logger.error(f"提纲生成失败: {e}")
             return {
                 "status": "error",
                 "error": str(e)
             }
-    
-    async def generate_section_content(self, section_title: str, requirements: str, 
-                                     context: str = "") -> Dict[str, Any]:
+
+    async def generate_section_content(self, section_title: str, requirements: str,
+                                       context: str = "") -> Dict[str, Any]:
         """生成单个章节内容"""
         logger.info(f"开始生成章节内容: {section_title}")
-        
+
         try:
             from backend.services.llm_service import llm_service
             result = await llm_service.generate_content(section_title, requirements, context)
-            
+
             if result["status"] == "success":
                 return {
                     "status": "success",
@@ -276,18 +273,18 @@ class ContentGenerator:
                     "status": "error",
                     "error": result.get("error", "内容生成失败")
                 }
-                
+
         except Exception as e:
             logger.error(f"章节内容生成失败: {e}")
             return {
                 "status": "error",
                 "error": str(e)
             }
-    
+
     def get_output_files(self) -> List[Dict[str, Any]]:
         """获取输出文件列表"""
         files = []
-        
+
         if self.output_dir.exists():
             for file_path in self.output_dir.glob("*.docx"):
                 stat = file_path.stat()
@@ -298,7 +295,7 @@ class ContentGenerator:
                     "created_at": datetime.fromtimestamp(stat.st_ctime),
                     "modified_at": datetime.fromtimestamp(stat.st_mtime)
                 })
-        
+
         # 按修改时间倒序排列
         files.sort(key=lambda x: x["modified_at"], reverse=True)
         return files

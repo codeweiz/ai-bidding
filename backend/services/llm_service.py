@@ -5,20 +5,26 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_deepseek import ChatDeepSeek
 
 from backend.core.toml_config import toml_config
+from backend.services.llm_manager import llm_manager
+from backend.services.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    """LLM服务类，负责与AI模型交互"""
+    """LLM服务类，负责与AI模型交互 - 集成新的管理器"""
 
     def __init__(self):
+        # 保持向后兼容的直接LLM实例
         self.llm = ChatDeepSeek(
             model=toml_config.llm.model_name,
             api_key=toml_config.llm.api_key,
-            temperature=0.7,
-            max_tokens=4000,
+            temperature=config_manager.get("llm.temperature", 0.2),
+            max_tokens=config_manager.get("llm.max_tokens", 4000),
         )
+
+        # 集成新的LLM管理器
+        self.llm_manager = llm_manager
 
     async def analyze_requirements(self, document_content: str) -> Dict[str, Any]:
         """分析招标文档需求"""
@@ -242,12 +248,21 @@ class LLMService:
                 HumanMessage(content=user_prompt)
             ]
 
-            response = await self.llm.ainvoke(messages)
+            # 使用新的LLM管理器生成（支持重试和格式验证）
+            result = await self.llm_manager.generate_with_retry(messages)
 
-            return {
-                "outline": response.content,
-                "status": "success"
-            }
+            if result["status"] == "success":
+                return {
+                    "outline": result["content"],
+                    "status": "success"
+                }
+            else:
+                # 回退到直接调用
+                response = await self.llm.ainvoke(messages)
+                return {
+                    "outline": response.content,
+                    "status": "success"
+                }
         except Exception as e:
             logger.error(f"IPTV提纲生成失败: {e}")
             return {
@@ -260,33 +275,51 @@ class LLMService:
                                           document_content: str) -> Dict[str, Any]:
         """生成IPTV领域的章节内容 - 使用优化的prompt"""
         system_prompt = """
-        我的顶层目标，是编写一份投标方案的技术方案部分；
-        你需要扮演一位广电IPTV领域的行业专家，解决方案达人；
-        需要注意，后续所有的工作，都要紧密围绕上传的招标方案，尤其避免出现编写方案时自由发挥和扩散的情况。因此，你始终要记住这份方案的内容；
-        编制内容时，方案应尽可能贴合招标方案中提到的需求点，围绕需求点展开设计描述，但不要直接照抄原文；
-        涉及到技术实现的描述，应该更加偏逻辑描述，避免提到非常具体的技术栈；
-        涉及到需要架构设计的内容，应用plantuml(mermaid/Graphviz)的代码输出架构设计；
-        涉及到需要业务流程或系统流程、时序图等内容，同样用plantuml(mermaid/Graphviz)的代码输出流程设计。
+        你是一位资深的广电IPTV领域技术专家，具有15年以上的行业经验和丰富的投标方案编写经验。
 
-        内容要求：
-        1. 专业性强，术语使用准确
-        2. 逻辑清晰，结构合理
-        3. 紧密贴合招标需求
-        4. 避免虚构和夸大
-        5. 字数控制在800-1500字
-        6. 如需图表，使用mermaid代码块
-        7. 不要加说明性文字
-        8. 输出格式不要使用markdown格式
+        核心要求：
+        1. 严格基于招标文档要求，不要自由发挥
+        2. 输出专业、详实的技术方案内容
+        3. 确保内容逻辑清晰，阅读流畅
+        4. 避免涉及售后、验收、质量保障等内容
+
+        输出格式要求（非常重要）：
+        - 严格输出纯文本格式，绝对不要使用markdown格式
+        - 不要使用*号、#号、-号、```等任何markdown标记
+        - 不要输出mermaid、plantuml等代码块
+        - 不要使用列表符号（如• - *）
+        - 段落之间用空行分隔
+        - 重点内容用数字编号（1. 2. 3.）或中文序号（一、二、三、）
+        - 技术架构用详细的文字描述，不要生成任何图表代码
+        - 内容要专业、详实、有针对性
+        - 字数控制在1200-2000字
+
+        内容质量要求：
+        - 紧扣招标文档的具体要求和技术指标
+        - 体现IPTV领域的专业深度和技术实力
+        - 提供具体的技术方案和实施细节
+        - 确保内容的完整性和逻辑性
+        - 使用专业术语，避免空洞表述
+        - 内容要能无缝融入完整的投标方案，保证阅读流畅性
+
+        请确保生成的内容专业、准确、流畅，严格遵循格式要求。
         """
 
         user_prompt = f"""
-        章节标题如下：{section_title}
+        请为以下章节生成专业的IPTV技术方案内容：
+
+        章节标题：{section_title}
         章节路径：{section_path}
 
-        招标内容如下：
+        招标文档完整内容：
         {document_content}
 
-        请为该章节生成专业的技术方案内容。
+        请基于招标文档的具体要求，生成该章节的详细技术方案内容。
+        要求：
+        1. 内容专业详实，逻辑清晰
+        2. 紧扣招标需求，体现技术实力
+        3. 严格使用纯文本格式，不要任何markdown标记
+        4. 确保内容阅读流畅，能够无缝融入完整投标方案
         """
 
         try:
@@ -313,34 +346,53 @@ class LLMService:
                                     children_content: str, document_content: str) -> Dict[str, Any]:
         """生成父节点总结内容"""
         system_prompt = """
-        你是一位资深的技术方案编写专家，精通广电IPTV领域。
-        现在需要你为一个父级章节生成到子章节的过度性内容，该内容需要：
+        你是一位资深的技术方案编写专家，精通广电IPTV领域，擅长编写高质量的投标方案。
 
-        1. 基于所有子章节的内容进行总结和串联
-        2. 确保逻辑连贯，承上启下
-        3. 保持与招标需求的紧密关联
-        4. 避免虚构和夸大
-        5. 不要加说明性文字
-        6. 输出格式不要使用markdown格式
+        任务：为父级章节生成承上启下的过渡性内容，确保整个投标方案阅读流畅。
 
-        注意：
-        - 不要简单重复子章节内容
-        - 要有总结性和概括性
-        - 体现章节间的逻辑关系
-        - 突出重点和亮点
+        核心要求：
+        1. 基于子章节内容进行高质量的总结和串联
+        2. 确保逻辑连贯，承上启下，阅读流畅
+        3. 紧密结合招标需求，体现技术实力
+        4. 避免简单重复子章节内容
+        5. 要有总结性、概括性和前瞻性
+
+        输出格式要求（严格遵循）：
+        - 严格输出纯文本格式，绝对不要使用markdown格式
+        - 不要使用*号、#号、-号、```等任何markdown标记
+        - 不要使用列表符号（如• - *）
+        - 段落之间用空行分隔
+        - 重点内容用数字编号或中文序号
+        - 字数控制在600-1000字
+
+        内容质量要求：
+        - 体现章节间的逻辑关系和技术关联
+        - 突出技术方案的重点和亮点
+        - 确保内容专业、准确、有深度
+        - 保持与整体投标方案的一致性
+        - 增强方案的说服力和专业性
+
+        请确保生成的内容能够提升整个投标方案的阅读体验和专业水准。
         """
 
         user_prompt = f"""
+        请为以下父章节生成高质量的过渡性内容：
+
         父章节标题：{parent_title}
         章节路径：{parent_path}
 
-        子章节内容如下：
+        子章节详细内容：
         {children_content}
 
-        招标需求参考：
-        {document_content[:2000]}...
+        招标文档要求：
+        {document_content}
 
-        请生成该父章节的总结性内容。
+        请生成该父章节的总结性和过渡性内容，要求：
+        1. 对子章节内容进行高质量总结
+        2. 体现技术方案的整体性和逻辑性
+        3. 突出技术亮点和竞争优势
+        4. 确保与招标需求紧密结合
+        5. 严格使用纯文本格式，保证阅读流畅
         """
 
         try:
