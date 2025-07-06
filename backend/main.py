@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from backend.core.toml_config import toml_config
-from backend.api.routes import projects, documents, generation
+from backend.api.routes import projects, documents, generation, config, formatting
 
 # 设置日志
 logging.basicConfig(level=logging.INFO)
@@ -31,11 +31,14 @@ app.add_middleware(
 app.include_router(projects.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
 app.include_router(generation.router, prefix="/api")
+app.include_router(config.router, prefix="/api")
+app.include_router(formatting.router, prefix="/api")
 
 # 创建必要的目录
 Path("uploads").mkdir(exist_ok=True)
 Path("outputs").mkdir(exist_ok=True)
 Path("logs").mkdir(exist_ok=True)
+Path("config").mkdir(exist_ok=True)
 
 # 静态文件服务
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

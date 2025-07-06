@@ -182,7 +182,7 @@ class WorkflowEngine:
             return state
     
     async def _generate_leaf_content(self, state: WorkflowState) -> WorkflowState:
-        """生成叶子节点内容 - 优先生成最底层内容"""
+        """生成叶子节点内容 - 并行生成所有叶子节点"""
         logger.info(f"开始生成叶子节点内容，项目ID: {state.project_id}")
 
         try:
@@ -195,30 +195,39 @@ class WorkflowEngine:
             for root_node in state.section_tree:
                 leaf_nodes.extend(root_node.get_all_leaf_nodes())
 
-            logger.info(f"找到{len(leaf_nodes)}个叶子节点")
+            logger.info(f"找到{len(leaf_nodes)}个叶子节点，开始并发生成")
 
-            # 为每个叶子节点生成内容
+            # 并发生成所有叶子节点内容
+            tasks = []
             for leaf_node in leaf_nodes:
-                logger.info(f"生成叶子节点内容: {leaf_node.get_path()}")
+                task = self._generate_single_leaf_content(leaf_node, state.document_content)
+                tasks.append(task)
 
-                result = await llm_service.generate_iptv_section_content(
-                    section_title=leaf_node.title,
-                    section_path=leaf_node.get_path(),
-                    document_content=state.document_content
-                )
+            # 等待所有任务完成
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                if result["status"] == "success":
-                    leaf_node.content = result["content"]
+            # 处理结果
+            success_count = 0
+            for i, (leaf_node, result) in enumerate(zip(leaf_nodes, results)):
+                if isinstance(result, Exception):
+                    logger.error(f"叶子节点内容生成异常: {leaf_node.title}, 错误: {result}")
+                    leaf_node.content = ""
+                    leaf_node.is_generated = False
+                elif result["status"] == "success":
+                    # 清理内容中的markdown格式
+                    cleaned_content = self._clean_markdown_format(result["content"])
+                    leaf_node.content = cleaned_content
                     leaf_node.is_generated = True
+                    success_count += 1
                     logger.info(f"叶子节点内容生成成功: {leaf_node.title}")
                 else:
-                    logger.error(f"叶子节点内容生成失败: {result.get('error')}")
+                    logger.error(f"叶子节点内容生成失败: {leaf_node.title}, 错误: {result.get('error')}")
                     leaf_node.content = ""
                     leaf_node.is_generated = False
 
             state.current_step = "generate_leaf_content"
             state.updated_at = datetime.now()
-            logger.info(f"叶子节点内容生成完成，项目ID: {state.project_id}")
+            logger.info(f"叶子节点内容生成完成，项目ID: {state.project_id}, 成功: {success_count}/{len(leaf_nodes)}")
 
             return state
 
@@ -226,9 +235,26 @@ class WorkflowEngine:
             logger.error(f"叶子节点内容生成异常: {e}")
             state.error = str(e)
             return state
+
+    async def _generate_single_leaf_content(self, leaf_node: 'SectionNode', document_content: str) -> Dict[str, Any]:
+        """生成单个叶子节点内容"""
+        try:
+            # 使用完整文档内容以确保内容质量
+            # 注释掉相关性筛选，直接使用完整内容
+            # relevant_content = await self._get_relevant_content(leaf_node, document_content)
+
+            result = await llm_service.generate_iptv_section_content(
+                section_title=leaf_node.title,
+                section_path=leaf_node.get_path(),
+                document_content=document_content  # 使用完整文档内容
+            )
+            return result
+        except Exception as e:
+            logger.error(f"生成单个叶子节点内容失败: {leaf_node.title}, 错误: {e}")
+            return {"status": "error", "error": str(e)}
     
     async def _generate_parent_summaries(self, state: WorkflowState) -> WorkflowState:
-        """生成父节点总结 - 基于子节点内容生成上级总结"""
+        """生成父节点总结 - 并行生成父节点总结"""
         logger.info(f"开始生成父节点总结，项目ID: {state.project_id}")
 
         try:
@@ -236,9 +262,39 @@ class WorkflowEngine:
                 state.error = "章节树未构建，无法生成父节点总结"
                 return state
 
-            # 从最深层开始，逐层向上生成父节点总结
+            # 收集所有需要生成总结的父节点
+            parent_nodes = []
             for root_node in state.section_tree:
-                await self._generate_node_summary_recursive(root_node, state.document_content)
+                parent_nodes.extend(self._collect_parent_nodes(root_node))
+
+            logger.info(f"找到{len(parent_nodes)}个父节点，开始并行生成总结")
+
+            # 并行生成所有父节点总结
+            tasks = []
+            for parent_node in parent_nodes:
+                task = self._generate_single_parent_summary(parent_node, state.document_content)
+                tasks.append(task)
+
+            # 等待所有任务完成
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # 处理结果
+                success_count = 0
+                for i, (parent_node, result) in enumerate(zip(parent_nodes, results)):
+                    if isinstance(result, Exception):
+                        logger.error(f"父节点总结生成异常: {parent_node.title}, 错误: {result}")
+                    elif result["status"] == "success":
+                        # 清理内容中的markdown格式
+                        cleaned_content = self._clean_markdown_format(result["content"])
+                        parent_node.content = cleaned_content
+                        parent_node.is_generated = True
+                        success_count += 1
+                        logger.info(f"父节点总结生成成功: {parent_node.title}")
+                    else:
+                        logger.error(f"父节点总结生成失败: {parent_node.title}, 错误: {result.get('error')}")
+
+                logger.info(f"父节点总结生成完成，成功: {success_count}/{len(parent_nodes)}")
 
             # 更新sections列表
             state.sections = self._tree_to_sections_list(state.section_tree)
@@ -448,16 +504,164 @@ class WorkflowEngine:
     async def run_workflow(self, initial_state: WorkflowState) -> WorkflowState:
         """运行工作流"""
         logger.info(f"启动工作流，项目ID: {initial_state.project_id}")
-        
+
         try:
             # 运行工作流
             final_state = await self.graph.ainvoke(initial_state)
             return final_state
-            
+
         except Exception as e:
             logger.error(f"工作流执行失败: {e}")
             initial_state.error = str(e)
             return initial_state
+
+    async def _get_relevant_content(self, leaf_node: 'SectionNode', document_content: str) -> str:
+        """获取与章节相关的文档内容（向量检索优化）"""
+        try:
+            # 如果文档内容较短，直接返回全部内容
+            if len(document_content) <= 2000:
+                return document_content
+
+            # 构建查询关键词
+            query_keywords = [
+                leaf_node.title,
+                leaf_node.get_path(),
+            ]
+
+            # 添加父节点标题作为上下文
+            if leaf_node.parent:
+                query_keywords.append(leaf_node.parent.title)
+
+            query = " ".join(query_keywords)
+
+            # 简单的关键词匹配（后续可以升级为向量检索）
+            relevant_chunks = self._extract_relevant_chunks(query, document_content)
+
+            # 如果找到相关内容，返回相关部分；否则返回前2000字符
+            if relevant_chunks:
+                return "\n".join(relevant_chunks)
+            else:
+                return document_content[:2000] + "..."
+
+        except Exception as e:
+            logger.warning(f"获取相关内容失败: {e}，使用原始内容")
+            return document_content[:2000] + "..."
+
+    def _extract_relevant_chunks(self, query: str, content: str, max_chunks: int = 3) -> List[str]:
+        """提取相关文档片段"""
+        try:
+            # 将文档分割为段落
+            paragraphs = content.split('\n\n')
+
+            # 计算每个段落的相关性得分
+            scored_paragraphs = []
+            query_words = set(query.lower().split())
+
+            for para in paragraphs:
+                if len(para.strip()) < 50:  # 跳过太短的段落
+                    continue
+
+                para_words = set(para.lower().split())
+                # 计算关键词重叠度
+                overlap = len(query_words.intersection(para_words))
+                if overlap > 0:
+                    score = overlap / len(query_words)
+                    scored_paragraphs.append((score, para))
+
+            # 按得分排序，取前N个
+            scored_paragraphs.sort(key=lambda x: x[0], reverse=True)
+            relevant_chunks = [para for score, para in scored_paragraphs[:max_chunks]]
+
+            return relevant_chunks
+
+        except Exception as e:
+            logger.warning(f"提取相关片段失败: {e}")
+            return []
+
+    def _collect_parent_nodes(self, node: SectionNode) -> List[SectionNode]:
+        """收集所有父节点（非叶子节点）"""
+        parent_nodes = []
+
+        # 如果不是叶子节点，则是父节点
+        if not node.is_leaf:
+            parent_nodes.append(node)
+
+        # 递归收集子节点中的父节点
+        for child in node.children:
+            parent_nodes.extend(self._collect_parent_nodes(child))
+
+        return parent_nodes
+
+    async def _generate_single_parent_summary(self, parent_node: SectionNode, document_content: str) -> Dict[str, Any]:
+        """生成单个父节点总结"""
+        try:
+            # 收集所有子节点的内容
+            children_content = []
+            for child in parent_node.children:
+                if child.content:
+                    children_content.append(f"章节：{child.title}\n{child.content}")
+
+            if not children_content:
+                return {"status": "error", "error": "子节点内容为空"}
+
+            combined_content = "\n\n".join(children_content)
+
+            # 生成父节点总结
+            result = await llm_service.generate_parent_summary(
+                parent_title=parent_node.title,
+                parent_path=parent_node.get_path(),
+                children_content=combined_content,
+                document_content=document_content
+            )
+
+            return result
+        except Exception as e:
+            logger.error(f"生成单个父节点总结失败: {parent_node.title}, 错误: {e}")
+            return {"status": "error", "error": str(e)}
+
+    def _clean_markdown_format(self, content: str) -> str:
+        """清理内容中的markdown格式标记"""
+        if not content:
+            return content
+
+        try:
+            # 移除markdown标题标记
+            content = re.sub(r'^#{1,6}\s+', '', content, flags=re.MULTILINE)
+
+            # 移除粗体和斜体标记
+            content = re.sub(r'\*\*([^*]+)\*\*', r'\1', content)  # 粗体
+            content = re.sub(r'\*([^*]+)\*', r'\1', content)      # 斜体
+            content = re.sub(r'__([^_]+)__', r'\1', content)      # 粗体
+            content = re.sub(r'_([^_]+)_', r'\1', content)        # 斜体
+
+            # 移除列表标记
+            content = re.sub(r'^[\s]*[-*+]\s+', '', content, flags=re.MULTILINE)
+            content = re.sub(r'^[\s]*\d+\.\s+', '', content, flags=re.MULTILINE)
+
+            # 移除代码块标记
+            content = re.sub(r'```[\s\S]*?```', '', content)  # 代码块
+            content = re.sub(r'`([^`]+)`', r'\1', content)    # 行内代码
+
+            # 移除链接标记
+            content = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', content)
+
+            # 移除引用标记
+            content = re.sub(r'^>\s+', '', content, flags=re.MULTILINE)
+
+            # 移除水平分割线
+            content = re.sub(r'^[-*_]{3,}$', '', content, flags=re.MULTILINE)
+
+            # 清理多余的空行
+            content = re.sub(r'\n{3,}', '\n\n', content)
+
+            # 清理首尾空白
+            content = content.strip()
+
+            return content
+
+        except Exception as e:
+            logger.warning(f"清理markdown格式失败: {e}")
+            return content
 
 
 # 全局实例
