@@ -1,20 +1,25 @@
 """
-配置管理服务 - 动态配置管理
+配置管理服务 - 动态配置管理，支持TOML格式
 """
-import logging
 import json
-from pathlib import Path
-from typing import Dict, Any, Optional
+import logging
 from datetime import datetime
+from pathlib import Path
+from typing import Dict, Any
+
+import toml
 
 logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
-    """配置管理器 - 支持动态配置和持久化"""
-    
+    """配置管理器 - 支持动态配置和持久化，优先使用TOML格式"""
+
     def __init__(self):
-        self.config_file = Path("config/dynamic_config.json")
+        # 优先使用TOML格式，回退到JSON
+        self.toml_config_file = Path("config/dynamic_config.toml")
+        self.json_config_file = Path("config/dynamic_config.json")
+        self.config_file = self.toml_config_file if self.toml_config_file.exists() else self.json_config_file
         self.config_file.parent.mkdir(exist_ok=True)
         
         # 默认配置
@@ -120,29 +125,46 @@ class ConfigManager:
         self.config = self._load_config()
     
     def _load_config(self) -> Dict[str, Any]:
-        """加载配置"""
+        """加载配置，优先使用TOML格式"""
         try:
-            if self.config_file.exists():
-                with open(self.config_file, 'r', encoding='utf-8') as f:
+            # 优先尝试加载TOML配置
+            if self.toml_config_file.exists():
+                with open(self.toml_config_file, 'r', encoding='utf-8') as f:
+                    loaded_config = toml.load(f)
+                self.config_file = self.toml_config_file
+                logger.info("TOML配置加载成功")
+            # 回退到JSON配置
+            elif self.json_config_file.exists():
+                with open(self.json_config_file, 'r', encoding='utf-8') as f:
                     loaded_config = json.load(f)
-                
-                # 合并默认配置和加载的配置
-                config = self._deep_merge(self.default_config.copy(), loaded_config)
-                logger.info("配置加载成功")
-                return config
+                self.config_file = self.json_config_file
+                logger.info("JSON配置加载成功")
             else:
                 logger.info("配置文件不存在，使用默认配置")
                 return self.default_config.copy()
+
+            # 合并默认配置和加载的配置
+            config = self._deep_merge(self.default_config.copy(), loaded_config)
+            return config
         except Exception as e:
             logger.error(f"加载配置失败: {e}，使用默认配置")
             return self.default_config.copy()
-    
+
     def _save_config(self):
-        """保存配置"""
+        """保存配置，优先使用TOML格式"""
         try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, ensure_ascii=False, indent=2)
-            logger.info("配置保存成功")
+            # 如果当前使用的是TOML文件或者TOML文件存在，则保存为TOML
+            if self.config_file == self.toml_config_file or self.toml_config_file.exists():
+                with open(self.toml_config_file, 'w', encoding='utf-8') as f:
+                    toml.dump(self.config, f)
+                self.config_file = self.toml_config_file
+                logger.info("配置保存成功 (TOML格式)")
+            else:
+                # 回退到JSON格式
+                with open(self.json_config_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.config, f, ensure_ascii=False, indent=2)
+                self.config_file = self.json_config_file
+                logger.info("配置保存成功 (JSON格式)")
         except Exception as e:
             logger.error(f"保存配置失败: {e}")
     
@@ -239,27 +261,35 @@ class ConfigManager:
         else:
             raise ValueError(f"Provider不存在: {provider_name}")
     
-    def export_config(self, file_path: str = None) -> str:
-        """导出配置"""
+    def export_config(self, file_path: str = None, format_type: str = "toml") -> str:
+        """导出配置，支持TOML和JSON格式"""
         if not file_path:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            file_path = f"config/config_backup_{timestamp}.json"
-        
+            ext = "toml" if format_type.lower() == "toml" else "json"
+            file_path = f"config/config_backup_{timestamp}.{ext}"
+
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, ensure_ascii=False, indent=2)
+                if format_type.lower() == "toml":
+                    toml.dump(self.config, f)
+                else:
+                    json.dump(self.config, f, ensure_ascii=False, indent=2)
             logger.info(f"配置导出成功: {file_path}")
             return file_path
         except Exception as e:
             logger.error(f"导出配置失败: {e}")
             raise
-    
+
     def import_config(self, file_path: str):
-        """导入配置"""
+        """导入配置，自动检测格式"""
         try:
+            file_path = Path(file_path)
             with open(file_path, 'r', encoding='utf-8') as f:
-                imported_config = json.load(f)
-            
+                if file_path.suffix.lower() == '.toml':
+                    imported_config = toml.load(f)
+                else:
+                    imported_config = json.load(f)
+
             self.config = self._deep_merge(self.default_config.copy(), imported_config)
             self._save_config()
             logger.info(f"配置导入成功: {file_path}")
