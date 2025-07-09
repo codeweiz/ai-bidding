@@ -18,7 +18,6 @@ help:
 	@echo "  make clean         - 清理缓存文件"
 	@echo ""
 	@echo "🚀 运行服务:"
-	@echo "  make run           - 一键启动所有服务"
 	@echo "  make run-backend   - 启动后端服务 (端口:$(BACKEND_PORT))"
 	@echo "  make run-frontend  - 启动前端服务 (端口:$(FRONTEND_PORT))"
 	@echo ""
