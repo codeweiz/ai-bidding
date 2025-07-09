@@ -21,7 +21,6 @@ help:
 	@echo "  make run           - 一键启动所有服务"
 	@echo "  make run-backend   - 启动后端服务 (端口:$(BACKEND_PORT))"
 	@echo "  make run-frontend  - 启动前端服务 (端口:$(FRONTEND_PORT))"
-	@echo "  make run-all       - 分别启动所有服务"
 	@echo ""
 	@echo "🧪 测试和质量:"
 	@echo "  make test          - 运行测试"
@@ -66,12 +65,6 @@ run-backend:
 run-frontend:
 	@echo "🚀 启动前端服务..."
 	$(PYTHON) -m frontend.app
-
-run-all:
-	@echo "🚀 启动所有服务..."
-	@echo "请在不同终端中运行以下命令："
-	@echo "1. make run-backend"
-	@echo "2. make run-frontend"
 
 # ==================== 测试和质量 ====================
 
