@@ -19,6 +19,7 @@ class LLMService:
         self.llm = ChatDeepSeek(
             model=toml_config.llm.model_name,
             api_key=toml_config.llm.api_key,
+            base_url=toml_config.llm.base_url,
             temperature=config_manager.get("llm.temperature", 0.2),
             max_tokens=config_manager.get("llm.max_tokens", 4000),
         )
