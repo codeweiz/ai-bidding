@@ -160,12 +160,14 @@ class LLMManager:
             "model_name": toml_config.llm.model_name,
             "api_key": toml_config.llm.api_key,
             "temperature": self.dynamic_config["temperature"],
-            "max_tokens": self.dynamic_config["max_tokens"]
+            "max_tokens": self.dynamic_config["max_tokens"],
+            "base_url": toml_config.llm.base_url
         }
+        self.providers["openai"] = OpenAIProvider(deepseek_config)
         self.providers["deepseek"] = DeepSeekProvider(deepseek_config)
         
         # 设置默认Provider
-        self.current_provider = "deepseek"
+        self.current_provider = "openai"
     
     def add_provider(self, name: str, provider_type: str, config: Dict[str, Any]):
         """动态添加Provider"""
