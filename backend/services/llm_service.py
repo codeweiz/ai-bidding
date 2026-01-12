@@ -2,11 +2,11 @@ import logging
 from typing import Dict, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_deepseek import ChatDeepSeek
+from langchain_openai import ChatOpenAI
 
 from backend.core.toml_config import toml_config
-from backend.services.llm_manager import llm_manager
 from backend.services.config_manager import config_manager
+from backend.services.llm_manager import llm_manager
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class LLMService:
 
     def __init__(self):
         # 保持向后兼容的直接LLM实例
-        self.llm = ChatDeepSeek(
+        self.llm = ChatOpenAI(
             model=toml_config.llm.model_name,
             api_key=toml_config.llm.api_key,
             base_url=toml_config.llm.base_url,
