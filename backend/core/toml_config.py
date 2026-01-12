@@ -34,6 +34,12 @@ class LLMConfig(BaseModel):
         description="LLM API Key"
     )
 
+    # LLM Base URL
+    base_url: str = Field(
+        default=_toml_config.get("llm", {}).get("base_url", ""),
+        description="LLM Base URL"
+    )
+
 
 # Embedding 配置
 class EmbeddingConfig(BaseModel):
