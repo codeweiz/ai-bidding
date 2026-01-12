@@ -167,7 +167,7 @@ class LLMManager:
         self.providers["deepseek"] = DeepSeekProvider(deepseek_config)
         
         # 设置默认Provider
-        self.current_provider = "openai"
+        self.current_provider = toml_config.llm.provider
     
     def add_provider(self, name: str, provider_type: str, config: Dict[str, Any]):
         """动态添加Provider"""
